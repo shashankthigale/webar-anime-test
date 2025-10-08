@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AR Testing — Camera Recording</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- A-Frame + extras + MindAR -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      html, body { margin:0; padding:0; height:100%; overflow:hidden; font-family:sans-serif; }
+      #start-overlay{
+        position:fixed; inset:0; background:#000; color:#fff; z-index:999;
+        display:flex; flex-direction:column; justify-content:center; align-items:center;
+      }
+      #start-button{
+        padding:14px 28px; font-size:16px; background:#00cec9; color:#fff;
+        border:0; border-radius:6px; cursor:pointer; margin-top:12px;
+      }
+      #rec-controls{
+        position:fixed; bottom:12px; left:12px; z-index:9999;
+        display:flex; gap:8px; align-items:center;
+        background:rgba(0,0,0,.55); color:#fff; padding:8px 10px; border-radius:10px;
+      }
+      #rec-toggle{
+        padding:10px 14px; border:0; border-radius:6px; background:#e63946; color:#fff; cursor:pointer;
+      }
+      #dl{
+        background:#0a7; color:#fff; padding:8px 12px; border-radius:6px; text-decoration:none; display:none;
+      }
+      #mic-label{ background:#000a; color:#fff; padding:6px 8px; border-radius:6px; }
+    </style>
+  </head>
+
+  <body>
+    <!-- Tap-to-start overlay (unlocks media on iOS) -->
+    <div id="start-overlay">
+      <h1>Tap to Start AR Experience</h1>
+      <button id="start-button">Start</button>
+    </div>
+
+    <!-- Camera-record controls (raw camera, no overlays) -->
+    <div id="rec-controls">
+      <button id="rec-toggle">● Record Camera</button>
+      <label id="mic-label"><input id="include-mic" type="checkbox"> Include mic</label>
+      <a id="dl" download>Download</a>
+    </div>
+
+    <!-- A-Frame Scene -->
+    <a-scene
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: true; uiScanning: true; uiLoading: true;"
+      embedded
+      color-space="sRGB"
+      renderer="colorManagement: true, physicallyCorrectLights"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: true"
+      id="ar-scene"
+    >
+      <a-assets>
+        <!-- Your overlay video (this is NOT the camera feed) -->
+        <video
+          id="ad-video"
+          src="./video.mp4"
+          preload="auto"
+          crossorigin="anonymous"
+          playsinline
+          webkit-playsinline
+          controls
+          muted
+        ></video>
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
+        <a-video
+          id="video-plane"
+          src="#ad-video"
+          width="1"
+          height="1.5"
+          position="0 0 0"
+          rotation="0 0 0"
+        ></a-video>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const startButton = document.getElementById("start-button");
+      const overlay = document.getElementById("start-overlay");
+      const video = document.getElementById("ad-video");
+      const target = document.getElementById("video-target");
+
+      const sceneEl = document.querySelector('a-scene');
+      const recBtn  = document.getElementById('rec-toggle');
+      const dl      = document.getElementById('dl');
+      const micBox  = document.getElementById('include-mic');
+
+      let audioUnlocked = false;
+      let cameraVideoEl = null;   // MindAR's hidden <video> with srcObject MediaStream
+      let mediaRecorder, chunks = [];
+      let micStream = null;
+      let recording = false;
+
+      // Unlock media on user gesture; keep overlay video paused until target is found
+      startButton.addEventListener("click", async () => {
+        try { await video.play(); } catch(e) {}
+        video.pause();
+        audioUnlocked = true;
+        overlay.style.display = "none";
+      });
+
+      // Play/pause overlay asset based on marker visibility
+      target.addEventListener("targetFound", () => { if (audioUnlocked) video.play(); });
+      target.addEventListener("targetLost",  () => { video.pause(); });
+
+      // MindAR ready -> find the camera <video> MindAR created
+      sceneEl.addEventListener("arReady", () => {
+        const vids = Array.from(document.querySelectorAll('video'));
+        cameraVideoEl = vids.find(v => v !== video && v.srcObject instanceof MediaStream);
+        if (!cameraVideoEl) {
+          console.warn("MindAR camera <video> not found yet; recording will work once it's present.");
+        } else {
+          const st = cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() || {};
+          console.log("Camera track:", st.width, "x", st.height, st.frameRate || "fps?");
+        }
+      });
+
+      function pickMime() {
+        // Prefer MP4/H.264 on Safari; otherwise WebM
+        const prefs = [
+          'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm'
+        ];
+        return prefs.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+      }
+
+      async function startCameraRecording() {
+        if (!cameraVideoEl || !(cameraVideoEl.srcObject instanceof MediaStream)) {
+          alert('Camera not ready yet — try again in a second.');
+          return;
+        }
+
+        // Clone the camera track so tracking continues uninterrupted
+        const camTrack = cameraVideoEl.srcObject.getVideoTracks()[0];
+        const clonedVideoTrack = camTrack.clone();
+
+        const tracks = [clonedVideoTrack];
+
+        // Optional mic
+        if (micBox.checked) {
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            micStream.getAudioTracks().forEach(t => tracks.push(t));
+          } catch (e) {
+            console.warn('Mic denied/failed:', e);
+          }
+        }
+
+        const outStream = new MediaStream(tracks);
+        const mime = pickMime();
+        mediaRecorder = new MediaRecorder(outStream, {
+          mimeType: mime,
+          videoBitsPerSecond: 8_000_000
+        });
+        chunks = [];
+
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          dl.href = url;
+          dl.download = (mediaRecorder.mimeType || '').includes('mp4') ? 'camera.mp4' : 'camera.webm';
+          dl.style.display = 'inline-block';
+
+          if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+          recording = false;
+          recBtn.textContent = '● Record Camera';
+        };
+
+        mediaRecorder.start();
+        recording = true;
+        dl.style.display = 'none';
+        recBtn.textContent = '⏹ Stop';
+      }
+
+      function stopCameraRecording() {
+        if (mediaRecorder && recording) mediaRecorder.stop();
+      }
+
+      recBtn.addEventListener('click', () => {
+        if (!recording) startCameraRecording(); else stopCameraRecording();
+      });
+    </script>
+  </body>
+</html>
