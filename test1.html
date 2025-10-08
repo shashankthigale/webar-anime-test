@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>AR Testing — Camera Recording</title>
+    <title>AR Testing — Composite Recording (Camera + AR)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- A-Frame + extras + MindAR -->
@@ -42,12 +42,15 @@
       <button id="start-button">Start</button>
     </div>
 
-    <!-- Camera-record controls (raw camera, no overlays) -->
+    <!-- Composite-record controls (camera + AR overlays) -->
     <div id="rec-controls">
-      <button id="rec-toggle">● Record Camera</button>
+      <button id="rec-toggle">● Record Camera + AR</button>
       <label id="mic-label"><input id="include-mic" type="checkbox"> Include mic</label>
       <a id="dl" download>Download</a>
     </div>
+
+    <!-- Hidden mixer canvas (we record this) -->
+    <canvas id="mix-canvas" style="display:none;"></canvas>
 
     <!-- A-Frame Scene -->
     <a-scene
@@ -60,7 +63,7 @@
       id="ar-scene"
     >
       <a-assets>
-        <!-- Your overlay video (this is NOT the camera feed) -->
+        <!-- Overlay video (NOT the camera) -->
         <video
           id="ad-video"
           src="./video.mp4"
@@ -69,7 +72,6 @@
           playsinline
           webkit-playsinline
           controls
-          muted
         ></video>
       </a-assets>
 
@@ -90,18 +92,20 @@
     <script>
       const startButton = document.getElementById("start-button");
       const overlay = document.getElementById("start-overlay");
+      const sceneEl = document.getElementById("ar-scene");
       const video = document.getElementById("ad-video");
       const target = document.getElementById("video-target");
 
-      const sceneEl = document.querySelector('a-scene');
       const recBtn  = document.getElementById('rec-toggle');
       const dl      = document.getElementById('dl');
       const micBox  = document.getElementById('include-mic');
+      const mixCanvas = document.getElementById('mix-canvas');
+      let mixCtx, rafId;
 
       let audioUnlocked = false;
       let cameraVideoEl = null;   // MindAR's hidden <video> with srcObject MediaStream
       let mediaRecorder, chunks = [];
-      let micStream = null;
+      let audioCtx, dest, micStream = null;
       let recording = false;
 
       // Unlock media on user gesture; keep overlay video paused until target is found
@@ -129,7 +133,6 @@
       });
 
       function pickMime() {
-        // Prefer MP4/H.264 on Safari; otherwise WebM
         const prefs = [
           'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
           'video/webm;codecs=vp9,opus',
@@ -139,30 +142,72 @@
         return prefs.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
       }
 
-      async function startCameraRecording() {
-        if (!cameraVideoEl || !(cameraVideoEl.srcObject instanceof MediaStream)) {
-          alert('Camera not ready yet — try again in a second.');
+      function sizeMixCanvas() {
+        const camW = cameraVideoEl?.videoWidth || 0;
+        const camH = cameraVideoEl?.videoHeight || 0;
+        const sceneCanvas = sceneEl.canvas;
+        const w = camW || sceneCanvas?.width || 1280;
+        const h = camH || sceneCanvas?.height || 720;
+        mixCanvas.width = w;
+        mixCanvas.height = h;
+        if (!mixCtx) mixCtx = mixCanvas.getContext('2d', { alpha: true });
+      }
+
+      function drawComposite() {
+        const sceneCanvas = sceneEl.canvas;
+        if (!cameraVideoEl || !sceneCanvas) { rafId = requestAnimationFrame(drawComposite); return; }
+
+        try {
+          // Draw camera full frame
+          mixCtx.drawImage(cameraVideoEl, 0, 0, mixCanvas.width, mixCanvas.height);
+          // Draw AR overlays (WebGL canvas) on top
+          mixCtx.drawImage(sceneCanvas, 0, 0, mixCanvas.width, mixCanvas.height);
+        } catch (e) {
+          // Likely CORS/taint issue; stop gracefully
+          console.warn('Composite draw failed (CORS/taint?):', e);
+        }
+        rafId = requestAnimationFrame(drawComposite);
+      }
+
+      async function startCompositeRecording() {
+        if (!cameraVideoEl || !(cameraVideoEl.srcObject instanceof MediaStream) || !sceneEl.canvas) {
+          alert('Camera/scene not ready yet — try again in a second.');
           return;
         }
 
-        // Clone the camera track so tracking continues uninterrupted
-        const camTrack = cameraVideoEl.srcObject.getVideoTracks()[0];
-        const clonedVideoTrack = camTrack.clone();
+        // Size mixer to camera (preferred) or scene
+        sizeMixCanvas();
 
-        const tracks = [clonedVideoTrack];
+        // Start composite draw loop
+        cancelAnimationFrame(rafId);
+        drawComposite();
 
-        // Optional mic
+        // Capture composite video from the mixer canvas
+        const videoTrack = mixCanvas.captureStream(30).getVideoTracks()[0];
+
+        // Build audio mix (overlay video audio + optional mic)
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        dest     = audioCtx.createMediaStreamDestination();
+
+        // Route overlay <video> audio to recorder (and to device speakers, optional)
+        const vSrc = audioCtx.createMediaElementSource(video);
+        vSrc.connect(dest);
+        vSrc.connect(audioCtx.destination);
+
         if (micBox.checked) {
           try {
             micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            micStream.getAudioTracks().forEach(t => tracks.push(t));
+            const mSrc = audioCtx.createMediaStreamSource(micStream);
+            mSrc.connect(dest);
           } catch (e) {
             console.warn('Mic denied/failed:', e);
           }
         }
 
-        const outStream = new MediaStream(tracks);
+        // Combine composite video + mixed audio
+        const outStream = new MediaStream([videoTrack, ...dest.stream.getAudioTracks()]);
         const mime = pickMime();
+
         mediaRecorder = new MediaRecorder(outStream, {
           mimeType: mime,
           videoBitsPerSecond: 8_000_000
@@ -174,13 +219,19 @@
           const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'video/webm' });
           const url = URL.createObjectURL(blob);
           dl.href = url;
-          dl.download = (mediaRecorder.mimeType || '').includes('mp4') ? 'camera.mp4' : 'camera.webm';
+          dl.download = (mediaRecorder.mimeType || '').includes('mp4') ? 'ar-composite.mp4' : 'ar-composite.webm';
           dl.style.display = 'inline-block';
 
+          // Cleanup
+          cancelAnimationFrame(rafId);
           if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+          try { audioCtx.close(); } catch(_) {}
           recording = false;
-          recBtn.textContent = '● Record Camera';
+          recBtn.textContent = '● Record Camera + AR';
         };
+
+        // iOS: resume AudioContext on user gesture if needed
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
 
         mediaRecorder.start();
         recording = true;
@@ -188,12 +239,12 @@
         recBtn.textContent = '⏹ Stop';
       }
 
-      function stopCameraRecording() {
+      function stopCompositeRecording() {
         if (mediaRecorder && recording) mediaRecorder.stop();
       }
 
       recBtn.addEventListener('click', () => {
-        if (!recording) startCameraRecording(); else stopCameraRecording();
+        if (!recording) startCompositeRecording(); else stopCompositeRecording();
       });
     </script>
   </body>
