@@ -33,48 +33,6 @@
       }
       #mic-label{ background:#000a; color:#fff; padding:6px 8px; border-radius:6px; }
     </style>
-
-    <!-- Pose smoothing component (content-side) -->
-    <script>
-      // A-Frame component that follows an anchor with smoothing (pos/rot/scale)
-      AFRAME.registerComponent('smooth-follow', {
-        schema: { target: { type: 'selector' }, alpha: { default: 0.15 } },
-        init() {
-          this.tmpPos = new THREE.Vector3();
-          this.tmpQuat = new THREE.Quaternion();
-          this.tmpScale = new THREE.Vector3(1,1,1);
-          this.sPos = new THREE.Vector3();
-          this.sQuat = new THREE.Quaternion();
-          this.sScale = new THREE.Vector3(1,1,1);
-          this.initialized = false;
-        },
-        tick() {
-          const anchor = this.data.target;
-          if (!anchor) return;
-          const aobj = anchor.object3D;
-          aobj.getWorldPosition(this.tmpPos);
-          aobj.getWorldQuaternion(this.tmpQuat);
-          aobj.getWorldScale(this.tmpScale);
-
-          if (!this.initialized) {
-            this.sPos.copy(this.tmpPos);
-            this.sQuat.copy(this.tmpQuat);
-            this.sScale.copy(this.tmpScale);
-            this.initialized = true;
-          } else {
-            const a = this.data.alpha;
-            this.sPos.lerp(this.tmpPos, a);
-            this.sQuat.slerp(this.tmpQuat, a);
-            this.sScale.lerp(this.tmpScale, a);
-          }
-
-          const o = this.el.object3D;
-          o.position.copy(this.sPos);
-          o.quaternion.copy(this.sQuat);
-          o.scale.copy(this.sScale);
-        }
-      });
-    </script>
   </head>
 
   <body>
@@ -105,8 +63,7 @@
       id="ar-scene"
     >
       <a-assets>
-        <!-- Overlay video (NOT the camera).
-             Note: start as muted to pass autoplay rules, we'll unmute after the Start click. -->
+        <!-- Overlay video (NOT the camera) -->
         <video
           id="ad-video"
           src="./video.mp4"
@@ -114,23 +71,18 @@
           crossorigin="anonymous"
           playsinline
           webkit-playsinline
-          muted
+          controls
         ></video>
       </a-assets>
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <!-- MindAR anchor (empty; we just listen to its events & read its pose) -->
-      <a-entity mindar-image-target="targetIndex: 0" id="video-target"></a-entity>
-
-      <!-- Smoothed follower (NOT parented to anchor). Content goes here. -->
-      <a-entity id="smooth-follow" smooth-follow="target: #video-target; alpha: 0.15" visible="false">
-        <!-- Slight overscan to hide sub-pixel wiggle -->
+      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
         <a-video
           id="video-plane"
           src="#ad-video"
-          width="1.326"
-          height="1.734"
+          width="1.3"
+          height="1.7"
           position="0 0 0"
           rotation="0 0 0"
         ></a-video>
@@ -143,7 +95,6 @@
       const sceneEl = document.getElementById("ar-scene");
       const video = document.getElementById("ad-video");
       const target = document.getElementById("video-target");
-      const smoothFollowEl = document.getElementById("smooth-follow");
 
       const recBtn  = document.getElementById('rec-toggle');
       const dl      = document.getElementById('dl');
@@ -157,35 +108,28 @@
       let audioCtx, dest, micStream = null;
       let recording = false;
 
-      // Unlock media on user gesture; prime the video element for later programmatic play
+      // Unlock media on user gesture; keep overlay video paused until target is found
       startButton.addEventListener("click", async () => {
-        try {
-          // unmute now that we have a real gesture; then do a quick play/pause to "unlock"
-          video.muted = false;
-          await video.play();
-          video.pause();
-        } catch(e) {
-          // fallback: keep muted if needed for autoplay rules
-          video.muted = true;
-        }
+        try { await video.play(); } catch(e) {}
+        video.pause();
         audioUnlocked = true;
         overlay.style.display = "none";
       });
 
-      // Show/hide smoothed content + control playback based on marker visibility
-      target.addEventListener("targetFound", async () => {
-        smoothFollowEl.setAttribute('visible', true);
-        try { await video.play(); } catch(e) { /* ignore if blocked; still visible */ }
-      });
-      target.addEventListener("targetLost",  () => {
-        smoothFollowEl.setAttribute('visible', false);
-        try { video.pause(); } catch(_) {}
-      });
+      // Play/pause overlay asset based on marker visibility
+      target.addEventListener("targetFound", () => { if (audioUnlocked) video.play(); });
+      target.addEventListener("targetLost",  () => { video.pause(); });
 
       // MindAR ready -> find the camera <video> MindAR created
       sceneEl.addEventListener("arReady", () => {
         const vids = Array.from(document.querySelectorAll('video'));
         cameraVideoEl = vids.find(v => v !== video && v.srcObject instanceof MediaStream);
+        if (!cameraVideoEl) {
+          console.warn("MindAR camera <video> not found yet; recording will work once it's present.");
+        } else {
+          const st = cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() || {};
+          console.log("Camera track:", st.width, "x", st.height, st.frameRate || "fps?");
+        }
       });
 
       function pickMime() {
@@ -211,4 +155,97 @@
 
       function drawComposite() {
         const sceneCanvas = sceneEl.canvas;
-        if (!cameraVideoEl || !sceneCanvas) { raf
+        if (!cameraVideoEl || !sceneCanvas) { rafId = requestAnimationFrame(drawComposite); return; }
+
+        try {
+          // Draw camera full frame
+          mixCtx.drawImage(cameraVideoEl, 0, 0, mixCanvas.width, mixCanvas.height);
+          // Draw AR overlays (WebGL canvas) on top
+          mixCtx.drawImage(sceneCanvas, 0, 0, mixCanvas.width, mixCanvas.height);
+        } catch (e) {
+          // Likely CORS/taint issue; stop gracefully
+          console.warn('Composite draw failed (CORS/taint?):', e);
+        }
+        rafId = requestAnimationFrame(drawComposite);
+      }
+
+      async function startCompositeRecording() {
+        if (!cameraVideoEl || !(cameraVideoEl.srcObject instanceof MediaStream) || !sceneEl.canvas) {
+          alert('Camera/scene not ready yet — try again in a second.');
+          return;
+        }
+
+        // Size mixer to camera (preferred) or scene
+        sizeMixCanvas();
+
+        // Start composite draw loop
+        cancelAnimationFrame(rafId);
+        drawComposite();
+
+        // Capture composite video from the mixer canvas
+        const videoTrack = mixCanvas.captureStream(30).getVideoTracks()[0];
+
+        // Build audio mix (overlay video audio + optional mic)
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        dest     = audioCtx.createMediaStreamDestination();
+
+        // Route overlay <video> audio to recorder (and to device speakers, optional)
+        const vSrc = audioCtx.createMediaElementSource(video);
+        vSrc.connect(dest);
+        vSrc.connect(audioCtx.destination);
+
+        if (micBox.checked) {
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mSrc = audioCtx.createMediaStreamSource(micStream);
+            mSrc.connect(dest);
+          } catch (e) {
+            console.warn('Mic denied/failed:', e);
+          }
+        }
+
+        // Combine composite video + mixed audio
+        const outStream = new MediaStream([videoTrack, ...dest.stream.getAudioTracks()]);
+        const mime = pickMime();
+
+        mediaRecorder = new MediaRecorder(outStream, {
+          mimeType: mime,
+          videoBitsPerSecond: 8_000_000
+        });
+        chunks = [];
+
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          dl.href = url;
+          dl.download = (mediaRecorder.mimeType || '').includes('mp4') ? 'ar-composite.mp4' : 'ar-composite.webm';
+          dl.style.display = 'inline-block';
+
+          // Cleanup
+          cancelAnimationFrame(rafId);
+          if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+          try { audioCtx.close(); } catch(_) {}
+          recording = false;
+          recBtn.textContent = '● Record Camera + AR';
+        };
+
+        // iOS: resume AudioContext on user gesture if needed
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+        mediaRecorder.start();
+        recording = true;
+        dl.style.display = 'none';
+        recBtn.textContent = '⏹ Stop';
+      }
+
+      function stopCompositeRecording() {
+        if (mediaRecorder && recording) mediaRecorder.stop();
+      }
+
+      recBtn.addEventListener('click', () => {
+        if (!recording) startCompositeRecording(); else stopCompositeRecording();
+      });
+    </script>
+  </body>
+</html>
