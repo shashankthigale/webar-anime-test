@@ -108,17 +108,12 @@
       let audioCtx, dest, micStream = null;
       let recording = false;
 
-      // *** Fix: prevent A-Frame canvas from intercepting the Start tap ***
-      sceneEl.style.pointerEvents = "none";
-
       // Unlock media on user gesture; keep overlay video paused until target is found
       startButton.addEventListener("click", async () => {
         try { await video.play(); } catch(e) {}
         video.pause();
         audioUnlocked = true;
         overlay.style.display = "none";
-        // re-enable scene interactions after user gesture
-        sceneEl.style.pointerEvents = "auto";
       });
 
       // Play/pause overlay asset based on marker visibility
@@ -168,6 +163,7 @@
           // Draw AR overlays (WebGL canvas) on top
           mixCtx.drawImage(sceneCanvas, 0, 0, mixCanvas.width, mixCanvas.height);
         } catch (e) {
+          // Likely CORS/taint issue; stop gracefully
           console.warn('Composite draw failed (CORS/taint?):', e);
         }
         rafId = requestAnimationFrame(drawComposite);
@@ -250,83 +246,6 @@
       recBtn.addEventListener('click', () => {
         if (!recording) startCompositeRecording(); else stopCompositeRecording();
       });
-    </script>
-
-    <!-- === Smoothing wrapper (adds a smoothed follower for the video plane) === -->
-    <script>
-      (function () {
-        const THREE = window.THREE;
-        const sceneEl = document.getElementById('ar-scene');
-        const targetEl = document.getElementById('video-target');
-        const planeEl  = document.getElementById('video-plane');
-
-        let anchor3D, scene3D, smoothGroup;
-        let smoothPos, smoothQuat, smoothScale;
-        let targetPos, targetQuat, targetScale;
-        let initialized = false;
-        let raf;
-
-        function setup() {
-          anchor3D = targetEl.object3D;
-          scene3D  = sceneEl.object3D;
-
-          // Create a smoothing group at scene root and reparent the video-plane under it
-          smoothGroup = new THREE.Group();
-          smoothGroup.visible = false; // becomes visible on first targetFound
-          scene3D.add(smoothGroup);
-          // Move the A-Frame entity's object3D under the smoothing group
-          smoothGroup.add(planeEl.object3D);
-
-          // Prepare reusable vectors/quaternions
-          smoothPos  = new THREE.Vector3();
-          smoothQuat = new THREE.Quaternion();
-          smoothScale= new THREE.Vector3(1,1,1);
-          targetPos  = new THREE.Vector3();
-          targetQuat = new THREE.Quaternion();
-          targetScale= new THREE.Vector3(1,1,1);
-
-          initialized = true;
-          loop();
-        }
-
-        function loop() {
-          const alpha = 0.15; // increase to 0.20 if still jittery
-          if (initialized) {
-            // get anchor world transform
-            anchor3D.updateWorldMatrix(true, false);
-            const m = anchor3D.matrixWorld;
-            m.decompose(targetPos, targetQuat, targetScale);
-
-            if (!smoothGroup.visible) {
-              // first-frame snap when coming from lost->found
-              smoothPos.copy(targetPos);
-              smoothQuat.copy(targetQuat);
-              smoothScale.copy(targetScale);
-            } else {
-              // smooth follow (position, rotation, scale)
-              smoothPos.lerp(targetPos, alpha);
-              THREE.Quaternion.slerp(smoothQuat, targetQuat, smoothQuat, alpha);
-              smoothScale.lerp(targetScale, alpha);
-            }
-
-            smoothGroup.position.copy(smoothPos);
-            smoothGroup.quaternion.copy(smoothQuat);
-            smoothGroup.scale.copy(smoothScale);
-          }
-          raf = requestAnimationFrame(loop);
-        }
-
-        // Wait for renderer to start so object3D graph exists
-        sceneEl.addEventListener('renderstart', setup, { once: true });
-
-        // Sync visibility with tracking state
-        targetEl.addEventListener('targetFound', () => {
-          if (smoothGroup) smoothGroup.visible = true;
-        });
-        targetEl.addEventListener('targetLost', () => {
-          if (smoothGroup) smoothGroup.visible = false;
-        });
-      })();
     </script>
   </body>
 </html>
