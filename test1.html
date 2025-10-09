@@ -33,6 +33,56 @@
       }
       #mic-label{ background:#000a; color:#fff; padding:6px 8px; border-radius:6px; }
     </style>
+
+    <!-- Pose smoothing component (content-side) -->
+    <script>
+      // A-Frame component that follows an anchor with smoothing (pos/rot/scale)
+      AFRAME.registerComponent('smooth-follow', {
+        schema: {
+          target: { type: 'selector' },  // anchor entity (e.g., #video-target)
+          alpha:  { default: 0.15 }       // 0..1; higher = more responsive, lower = steadier
+        },
+        init() {
+          this.tmpPos = new THREE.Vector3();
+          this.tmpQuat = new THREE.Quaternion();
+          this.tmpScale = new THREE.Vector3(1,1,1);
+
+          this.sPos = new THREE.Vector3();
+          this.sQuat = new THREE.Quaternion();
+          this.sScale = new THREE.Vector3(1,1,1);
+
+          this.initialized = false;
+        },
+        tick() {
+          const anchor = this.data.target;
+          if (!anchor) return;
+
+          const aobj = anchor.object3D;
+          // Read the anchor's WORLD transform
+          aobj.getWorldPosition(this.tmpPos);
+          aobj.getWorldQuaternion(this.tmpQuat);
+          aobj.getWorldScale(this.tmpScale);
+
+          if (!this.initialized) {
+            this.sPos.copy(this.tmpPos);
+            this.sQuat.copy(this.tmpQuat);
+            this.sScale.copy(this.tmpScale);
+            this.initialized = true;
+          } else {
+            const a = this.data.alpha;
+            this.sPos.lerp(this.tmpPos, a);
+            this.sQuat.slerp(this.tmpQuat, a);
+            this.sScale.lerp(this.tmpScale, a);
+          }
+
+          // Apply to THIS entity (not parented to anchor)
+          const o = this.el.object3D;
+          o.position.copy(this.sPos);
+          o.quaternion.copy(this.sQuat);
+          o.scale.copy(this.sScale);
+        }
+      });
+    </script>
   </head>
 
   <body>
@@ -77,12 +127,17 @@
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
+      <!-- MindAR anchor (empty; we just listen to its events & read its pose) -->
+      <a-entity mindar-image-target="targetIndex: 0" id="video-target"></a-entity>
+
+      <!-- Smoothed follower (NOT parented to anchor). Content goes here. -->
+      <a-entity id="smooth-follow" smooth-follow="target: #video-target; alpha: 0.15" visible="false">
+        <!-- Tip: slightly overscan width/height (+2%) to hide sub-pixel wiggle at edges -->
         <a-video
           id="video-plane"
           src="#ad-video"
-          width="1.3"
-          height="1.7"
+          width="1.326"   <!-- was 1.3 -->
+          height="1.734"  <!-- was 1.7 -->
           position="0 0 0"
           rotation="0 0 0"
         ></a-video>
@@ -95,6 +150,7 @@
       const sceneEl = document.getElementById("ar-scene");
       const video = document.getElementById("ad-video");
       const target = document.getElementById("video-target");
+      const smoothFollowEl = document.getElementById("smooth-follow");
 
       const recBtn  = document.getElementById('rec-toggle');
       const dl      = document.getElementById('dl');
@@ -116,9 +172,15 @@
         overlay.style.display = "none";
       });
 
-      // Play/pause overlay asset based on marker visibility
-      target.addEventListener("targetFound", () => { if (audioUnlocked) video.play(); });
-      target.addEventListener("targetLost",  () => { video.pause(); });
+      // Show/hide smoothed content + control playback based on marker visibility
+      target.addEventListener("targetFound", () => {
+        smoothFollowEl.setAttribute('visible', true);
+        if (audioUnlocked) video.play();
+      });
+      target.addEventListener("targetLost",  () => {
+        smoothFollowEl.setAttribute('visible', false);
+        video.pause();
+      });
 
       // MindAR ready -> find the camera <video> MindAR created
       sceneEl.addEventListener("arReady", () => {
@@ -163,7 +225,6 @@
           // Draw AR overlays (WebGL canvas) on top
           mixCtx.drawImage(sceneCanvas, 0, 0, mixCanvas.width, mixCanvas.height);
         } catch (e) {
-          // Likely CORS/taint issue; stop gracefully
           console.warn('Composite draw failed (CORS/taint?):', e);
         }
         rafId = requestAnimationFrame(drawComposite);
@@ -230,7 +291,6 @@
           recBtn.textContent = '● Record Camera + AR';
         };
 
-        // iOS: resume AudioContext on user gesture if needed
         if (audioCtx.state === 'suspended') await audioCtx.resume();
 
         mediaRecorder.start();
