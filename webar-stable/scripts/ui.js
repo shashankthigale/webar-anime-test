@@ -130,26 +130,92 @@ class ARUI {
    * @private
    */
   async startMindAR() {
+    console.log('🎥 Attempting to start MindAR...');
+
+    // First, check if camera API is available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const errorMsg = '❌ Camera API not supported by this browser. Please use a modern browser like Chrome, Firefox, or Safari.';
+      console.error(errorMsg);
+      alert(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    // Test camera access before starting MindAR
+    try {
+      console.log('🔍 Testing camera access...');
+      const testStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+      // Immediately stop the test stream
+      testStream.getTracks().forEach(track => track.stop());
+      console.log('✅ Camera access test successful');
+    } catch (testError) {
+      console.error('❌ Camera access test failed:', testError);
+      if (testError.name === 'NotAllowedError') {
+        const errorMsg = '🚫 Camera access denied. Please allow camera permissions in your browser settings and refresh the page.';
+        console.error(errorMsg);
+        alert(errorMsg);
+        throw testError;
+      } else if (testError.name === 'NotFoundError') {
+        const errorMsg = '📷 No camera found. Please check your camera connection.';
+        console.error(errorMsg);
+        alert(errorMsg);
+        throw testError;
+      }
+    }
+
     const scene = document.querySelector('a-scene[mindar]');
     if (!scene) {
-      throw new Error('MindAR scene not found');
+      const errorMsg = '❌ MindAR scene not found. Check if A-Frame and MindAR loaded properly.';
+      console.error(errorMsg);
+      alert(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    console.log('✅ MindAR scene found, attempting to start...');
+
+    // Check if MindAR is properly initialized
+    if (!scene.mindar) {
+      const errorMsg = '❌ MindAR not initialized on scene. Check CDN links and loading order.';
+      console.error(errorMsg);
+      alert(errorMsg);
+      throw new Error(errorMsg);
     }
 
     try {
+      console.log('🚀 Calling scene.mindar.start()...');
+
       // Start MindAR (this will request camera permissions)
       await scene.mindar.start();
 
-      console.log('MindAR started successfully');
+      console.log('✅ MindAR started successfully');
     } catch (error) {
-      console.error('Failed to start MindAR:', error);
+      console.error('❌ Failed to start MindAR. Full error:', error);
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
 
-      // Provide user-friendly error message
-      if (error.message && error.message.includes('NotAllowedError')) {
-        alert('Camera access denied. Please allow camera permissions and refresh the page.');
-      } else if (error.message && error.message.includes('NotFoundError')) {
-        alert('No camera found. Please check your camera connection.');
+      // More specific error handling
+      if (error.name === 'NotAllowedError' || error.message?.includes('NotAllowedError')) {
+        const errorMsg = '🚫 Camera access denied. Please allow camera permissions in your browser and refresh the page.';
+        console.error(errorMsg);
+        alert(errorMsg);
+      } else if (error.name === 'NotFoundError' || error.message?.includes('NotFoundError')) {
+        const errorMsg = '📷 No camera found. Please check your camera connection and try again.';
+        console.error(errorMsg);
+        alert(errorMsg);
+      } else if (error.name === 'NotSupportedError' || error.message?.includes('NotSupportedError')) {
+        const errorMsg = '⚠️ Camera not supported by this browser. Try a different browser or device.';
+        console.error(errorMsg);
+        alert(errorMsg);
+      } else if (error.message?.includes('targets.mind')) {
+        const errorMsg = '🎯 Target file issue. Please check that targets.mind is properly generated from your image.';
+        console.error(errorMsg);
+        alert(errorMsg);
       } else {
-        alert('Failed to start AR experience. Please check camera permissions and try again.');
+        const errorMsg = `⚠️ AR experience failed to start. Error: ${error.message || 'Unknown error'}. Please check camera permissions and try again.`;
+        console.error(errorMsg);
+        alert(errorMsg);
       }
 
       throw error;

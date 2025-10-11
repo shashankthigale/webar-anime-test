@@ -96,17 +96,48 @@
     <script>
       // Initialize the WebAR application
       document.addEventListener("DOMContentLoaded", function () {
+        console.log("🚀 WebAR Image Tracking App loading...");
+
+        // Check if required libraries loaded
+        console.log("A-Frame loaded:", !!window.AFRAME);
+        console.log("THREE.js loaded:", !!window.THREE);
+
         // Initialize the UI system (creates start overlay and controls)
-        initUI();
+        try {
+          initUI();
+          console.log("✅ UI system initialized");
+        } catch (error) {
+          console.error("❌ Failed to initialize UI:", error);
+        }
 
         // Optional: Log version info for debugging
         console.log("WebAR Image Tracking App initialized");
-        console.log("A-Frame version:", AFRAME.version);
+        console.log("A-Frame version:", AFRAME?.version);
+
+        // Check if MindAR loaded after a delay
+        setTimeout(() => {
+          const scene = document.querySelector("a-scene[mindar]");
+          console.log("MindAR scene element:", !!scene);
+          console.log("MindAR instance:", !!scene?.mindar);
+
+          if (!scene) {
+            console.warn(
+              "⚠️ MindAR scene not found. Check if MindAR library loaded correctly."
+            );
+          }
+          if (!scene?.mindar) {
+            console.warn(
+              "⚠️ MindAR not initialized on scene. Check loading order."
+            );
+          }
+        }, 2000);
       });
 
       // Error handling for unsupported browsers
       window.addEventListener("error", function (event) {
-        console.error("WebAR App Error:", event.error);
+        console.error("❌ WebAR App Error:", event.error);
+        console.error("Error filename:", event.filename);
+        console.error("Error line:", event.lineno);
 
         // Show user-friendly error message
         if (
@@ -118,6 +149,11 @@
             "Camera access is required for this AR experience. Please allow camera permissions and reload the page."
           );
         }
+      });
+
+      // Monitor script loading
+      window.addEventListener("load", function () {
+        console.log("✅ All scripts loaded");
       });
     </script>
 
