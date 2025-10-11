@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AR Experience — Image Tracking + Recording</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- A-Frame + extras + MindAR -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, sans-serif;
+      }
+
+      /* Start Overlay */
+      #start-overlay {
+        position: fixed;
+        inset: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #fff;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        transition: opacity 0.3s ease;
+      }
+      #start-overlay.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #start-overlay h1 {
+        font-size: 28px;
+        margin-bottom: 12px;
+        text-align: center;
+        padding: 0 20px;
+      }
+      #start-overlay p {
+        font-size: 16px;
+        opacity: 0.9;
+        text-align: center;
+        max-width: 400px;
+        padding: 0 20px;
+        margin-bottom: 24px;
+      }
+      #start-button {
+        padding: 16px 48px;
+        font-size: 18px;
+        font-weight: 600;
+        background: #fff;
+        color: #667eea;
+        border: 0;
+        border-radius: 50px;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+      #start-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+      }
+      #start-button:active {
+        transform: translateY(0);
+      }
+
+      /* Loading Indicator */
+      #loading-indicator {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.75);
+        color: #fff;
+        padding: 12px 24px;
+        border-radius: 25px;
+        z-index: 998;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        backdrop-filter: blur(10px);
+      }
+      #loading-indicator.show {
+        display: flex;
+      }
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Tracking Status */
+      #tracking-status {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.75);
+        color: #fff;
+        padding: 12px 24px;
+        border-radius: 25px;
+        z-index: 997;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
+      }
+      #tracking-status.show {
+        display: flex;
+      }
+      #tracking-status.tracking {
+        background: rgba(16, 185, 129, 0.9);
+      }
+      #tracking-status.searching {
+        background: rgba(245, 158, 11, 0.9);
+      }
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #fff;
+      }
+      .status-dot.pulse {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.5;
+          transform: scale(0.8);
+        }
+      }
+
+      /* Instructions */
+      #instructions {
+        position: fixed;
+        bottom: 100px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.75);
+        color: #fff;
+        padding: 16px 24px;
+        border-radius: 20px;
+        z-index: 996;
+        text-align: center;
+        max-width: 90%;
+        backdrop-filter: blur(10px);
+        display: none;
+        animation: slideUp 0.5s ease;
+      }
+      #instructions.show {
+        display: block;
+      }
+      @keyframes slideUp {
+        from {
+          transform: translate(-50%, 20px);
+          opacity: 0;
+        }
+        to {
+          transform: translate(-50%, 0);
+          opacity: 1;
+        }
+      }
+
+      /* Recording Controls */
+      #rec-controls {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+        transition: all 0.3s ease;
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.75);
+        padding: 12px 16px;
+        border-radius: 50px;
+        backdrop-filter: blur(10px);
+      }
+
+      #rec-toggle {
+        padding: 14px 28px;
+        border: 0;
+        border-radius: 50px;
+        background: #ef4444;
+        color: #fff;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s;
+        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+      }
+      #rec-toggle:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
+      }
+      #rec-toggle.recording {
+        background: #dc2626;
+        animation: recordPulse 1.5s ease-in-out infinite;
+      }
+      @keyframes recordPulse {
+        0%,
+        100% {
+          box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        }
+        50% {
+          box-shadow: 0 4px 25px rgba(239, 68, 68, 0.8);
+        }
+      }
+
+      #rec-duration {
+        font-size: 18px;
+        font-weight: 600;
+        color: #ef4444;
+        min-width: 60px;
+        text-align: center;
+        display: none;
+      }
+      #rec-duration.show {
+        display: block;
+      }
+
+      #mic-label {
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        padding: 8px 16px;
+        border-radius: 50px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: background 0.2s;
+      }
+      #mic-label:hover {
+        background: rgba(0, 0, 0, 0.8);
+      }
+      #include-mic {
+        cursor: pointer;
+      }
+
+      #dl {
+        background: #10b981;
+        color: #fff;
+        padding: 14px 28px;
+        border-radius: 50px;
+        text-decoration: none;
+        font-weight: 600;
+        display: none;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        transition: all 0.2s;
+      }
+      #dl.show {
+        display: inline-block;
+        animation: bounceIn 0.5s ease;
+      }
+      #dl:hover {
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+      }
+      @keyframes bounceIn {
+        0% {
+          transform: scale(0.8);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.05);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* Countdown Overlay */
+      #countdown-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 10000;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(5px);
+      }
+      #countdown-overlay.show {
+        display: flex;
+      }
+      #countdown-number {
+        font-size: 120px;
+        font-weight: 700;
+        color: #fff;
+        animation: countdownScale 1s ease-in-out;
+      }
+      @keyframes countdownScale {
+        0% {
+          transform: scale(0.5);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.2);
+          opacity: 1;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      /* Responsive */
+      @media (max-width: 600px) {
+        #start-overlay h1 {
+          font-size: 24px;
+        }
+        #start-overlay p {
+          font-size: 14px;
+        }
+        #start-button {
+          padding: 14px 36px;
+          font-size: 16px;
+        }
+        #rec-toggle {
+          padding: 12px 24px;
+          font-size: 15px;
+        }
+        #instructions {
+          font-size: 14px;
+          bottom: 120px;
+        }
+        .controls-row {
+          flex-direction: column;
+          border-radius: 20px;
+        }
+      }
+
+      /* Hidden mixer canvas */
+      #mix-canvas {
+        display: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Start Overlay -->
+    <div id="start-overlay">
+      <h1>🎯 AR Image Tracking Experience</h1>
+      <p>
+        Point your camera at the target image to see AR content come to life!
+      </p>
+      <button id="start-button">Start Experience</button>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading-indicator">
+      <div class="spinner"></div>
+      <span>Initializing AR...</span>
+    </div>
+
+    <!-- Tracking Status -->
+    <div id="tracking-status">
+      <div class="status-dot"></div>
+      <span id="status-text">Searching for target...</span>
+    </div>
+
+    <!-- Instructions -->
+    <div id="instructions">
+      <strong>📱 Point your camera at the target image</strong><br />
+      Move slowly and keep the target in view
+    </div>
+
+    <!-- Recording Controls -->
+    <div id="rec-controls">
+      <div class="controls-row">
+        <button id="rec-toggle">
+          <span id="rec-icon">●</span>
+          <span id="rec-text">Record</span>
+        </button>
+        <span id="rec-duration">0:00</span>
+      </div>
+      <div class="controls-row">
+        <label id="mic-label">
+          <input id="include-mic" type="checkbox" />
+          <span>🎤 Include Microphone</span>
+        </label>
+        <a id="dl">⬇ Download Video</a>
+      </div>
+    </div>
+
+    <!-- Countdown Overlay -->
+    <div id="countdown-overlay">
+      <div id="countdown-number">3</div>
+    </div>
+
+    <!-- Hidden mixer canvas (we record this) -->
+    <canvas id="mix-canvas"></canvas>
+
+    <!-- A-Frame Scene -->
+    <a-scene
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.05; filterBeta:40; warmupTolerance:3; missTolerance:3"
+      embedded
+      color-space="sRGB"
+      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: true"
+      id="ar-scene"
+    >
+      <a-assets>
+        <video
+          id="ad-video"
+          src="./overlay.mp4"
+          preload="auto"
+          crossorigin="anonymous"
+          playsinline
+          webkit-playsinline
+        ></video>
+      </a-assets>
+
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
+        <a-video
+          id="video-plane"
+          src="#ad-video"
+          width="1.3"
+          height="1.7"
+          position="0 0 0"
+          rotation="0 0 0"
+        ></a-video>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // ==================== State Management ====================
+      const state = {
+        audioUnlocked: false,
+        arReady: false,
+        cameraReady: false,
+        recording: false,
+        targetVisible: false,
+        recordingStartTime: 0,
+      };
+
+      // ==================== DOM Elements ====================
+      const elements = {
+        startButton: document.getElementById("start-button"),
+        startOverlay: document.getElementById("start-overlay"),
+        loadingIndicator: document.getElementById("loading-indicator"),
+        trackingStatus: document.getElementById("tracking-status"),
+        statusText: document.getElementById("status-text"),
+        statusDot: document.querySelector(".status-dot"),
+        instructions: document.getElementById("instructions"),
+        recBtn: document.getElementById("rec-toggle"),
+        recIcon: document.getElementById("rec-icon"),
+        recText: document.getElementById("rec-text"),
+        recDuration: document.getElementById("rec-duration"),
+        dl: document.getElementById("dl"),
+        micBox: document.getElementById("include-mic"),
+        countdownOverlay: document.getElementById("countdown-overlay"),
+        countdownNumber: document.getElementById("countdown-number"),
+        sceneEl: document.getElementById("ar-scene"),
+        video: document.getElementById("ad-video"),
+        target: document.getElementById("video-target"),
+        mixCanvas: document.getElementById("mix-canvas"),
+      };
+
+      // ==================== Recording Variables ====================
+      let mixCtx, rafId;
+      let cameraVideoEl = null;
+      let mediaRecorder,
+        chunks = [];
+      let audioCtx,
+        dest,
+        micStream = null;
+      let durationInterval = null;
+
+      // ==================== UI Helper Functions ====================
+      function showLoading(text = "Initializing AR...") {
+        elements.loadingIndicator.querySelector("span").textContent = text;
+        elements.loadingIndicator.classList.add("show");
+      }
+
+      function hideLoading() {
+        elements.loadingIndicator.classList.remove("show");
+      }
+
+      function updateTrackingStatus(isTracking) {
+        state.targetVisible = isTracking;
+        if (isTracking) {
+          elements.trackingStatus.classList.add("tracking");
+          elements.trackingStatus.classList.remove("searching");
+          elements.statusText.textContent = "Target Locked ✓";
+          elements.statusDot.classList.remove("pulse");
+          elements.instructions.classList.remove("show");
+        } else {
+          elements.trackingStatus.classList.remove("tracking");
+          elements.trackingStatus.classList.add("searching");
+          elements.statusText.textContent = "Searching for target...";
+          elements.statusDot.classList.add("pulse");
+          if (state.arReady) {
+            elements.instructions.classList.add("show");
+          }
+        }
+      }
+
+      function formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
+      }
+
+      function updateRecordingDuration() {
+        if (state.recording) {
+          const elapsed = Math.floor(
+            (Date.now() - state.recordingStartTime) / 1000
+          );
+          elements.recDuration.textContent = formatDuration(elapsed);
+        }
+      }
+
+      async function showCountdown() {
+        elements.countdownOverlay.classList.add("show");
+        for (let i = 3; i > 0; i--) {
+          elements.countdownNumber.textContent = i;
+          elements.countdownNumber.style.animation = "none";
+          // Trigger reflow
+          void elements.countdownNumber.offsetWidth;
+          elements.countdownNumber.style.animation =
+            "countdownScale 1s ease-in-out";
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        elements.countdownOverlay.classList.remove("show");
+      }
+
+      // ==================== Start Experience ====================
+      elements.startButton.addEventListener("click", async () => {
+        try {
+          showLoading("Unlocking media...");
+
+          // Unlock audio/video
+          await elements.video.play();
+          elements.video.pause();
+          state.audioUnlocked = true;
+
+          // Hide start overlay with fade
+          elements.startOverlay.classList.add("fade-out");
+          setTimeout(() => {
+            elements.startOverlay.style.display = "none";
+          }, 300);
+
+          showLoading("Starting AR tracking...");
+
+          // Start MindAR
+          const arSystem = elements.sceneEl.systems["mindar-image-system"];
+          await arSystem.start();
+        } catch (e) {
+          console.error("Start failed:", e);
+          alert("Failed to start AR. Please refresh and try again.");
+          hideLoading();
+        }
+      });
+
+      // ==================== AR Event Handlers ====================
+
+      // MindAR ready
+      elements.sceneEl.addEventListener("arReady", () => {
+        console.log("AR System Ready");
+        state.arReady = true;
+        hideLoading();
+
+        // Show tracking status
+        elements.trackingStatus.classList.add("show");
+        updateTrackingStatus(false);
+
+        // Show instructions
+        elements.instructions.classList.add("show");
+
+        // Find camera video element
+        setTimeout(() => {
+          const vids = Array.from(document.querySelectorAll("video"));
+          cameraVideoEl = vids.find(
+            (v) => v !== elements.video && v.srcObject instanceof MediaStream
+          );
+
+          if (cameraVideoEl) {
+            state.cameraReady = true;
+            const settings =
+              cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() ||
+              {};
+            console.log(
+              "Camera ready:",
+              settings.width,
+              "x",
+              settings.height,
+              settings.frameRate || "fps?"
+            );
+          } else {
+            console.warn("Camera video element not found yet");
+            // Retry after a delay
+            setTimeout(() => {
+              const retryVids = Array.from(document.querySelectorAll("video"));
+              cameraVideoEl = retryVids.find(
+                (v) =>
+                  v !== elements.video && v.srcObject instanceof MediaStream
+              );
+              if (cameraVideoEl) state.cameraReady = true;
+            }, 1000);
+          }
+        }, 500);
+      });
+
+      // Target found
+      elements.target.addEventListener("targetFound", () => {
+        console.log("Target found");
+        updateTrackingStatus(true);
+        if (state.audioUnlocked) {
+          elements.video
+            .play()
+            .catch((e) => console.warn("Video play failed:", e));
+        }
+      });
+
+      // Target lost
+      elements.target.addEventListener("targetLost", () => {
+        console.log("Target lost");
+        updateTrackingStatus(false);
+        elements.video.pause();
+      });
+
+      // ==================== Recording Functions ====================
+
+      function pickMime() {
+        const prefs = [
+          "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+          "video/webm;codecs=vp9,opus",
+          "video/webm;codecs=vp8,opus",
+          "video/webm",
+        ];
+        return (
+          prefs.find(
+            (t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)
+          ) || ""
+        );
+      }
+
+      function sizeMixCanvas() {
+        const camW = cameraVideoEl?.videoWidth || 0;
+        const camH = cameraVideoEl?.videoHeight || 0;
+        const sceneCanvas = elements.sceneEl.canvas;
+        const w = camW || sceneCanvas?.width || 1280;
+        const h = camH || sceneCanvas?.height || 720;
+        elements.mixCanvas.width = w;
+        elements.mixCanvas.height = h;
+        if (!mixCtx)
+          mixCtx = elements.mixCanvas.getContext("2d", {
+            alpha: true,
+            desynchronized: true,
+          });
+      }
+
+      function drawComposite() {
+        if (!state.recording) return;
+
+        const sceneCanvas = elements.sceneEl.canvas;
+        if (!cameraVideoEl || !sceneCanvas) {
+          rafId = requestAnimationFrame(drawComposite);
+          return;
+        }
+
+        try {
+          // Draw camera feed
+          mixCtx.drawImage(
+            cameraVideoEl,
+            0,
+            0,
+            elements.mixCanvas.width,
+            elements.mixCanvas.height
+          );
+          // Draw AR overlays on top
+          mixCtx.drawImage(
+            sceneCanvas,
+            0,
+            0,
+            elements.mixCanvas.width,
+            elements.mixCanvas.height
+          );
+        } catch (e) {
+          console.warn("Composite draw failed:", e);
+        }
+
+        rafId = requestAnimationFrame(drawComposite);
+      }
+
+      async function startCompositeRecording() {
+        if (
+          !state.cameraReady ||
+          !cameraVideoEl ||
+          !(cameraVideoEl.srcObject instanceof MediaStream)
+        ) {
+          alert("Camera not ready yet. Please wait a moment and try again.");
+          return;
+        }
+
+        if (!elements.sceneEl.canvas) {
+          alert("AR scene not ready. Please try again.");
+          return;
+        }
+
+        // Show countdown
+        await showCountdown();
+
+        // Size mixer canvas
+        sizeMixCanvas();
+
+        // Start composite drawing
+        cancelAnimationFrame(rafId);
+        state.recording = true;
+        drawComposite();
+
+        // Capture video from mixer canvas
+        const videoTrack = elements.mixCanvas
+          .captureStream(30)
+          .getVideoTracks()[0];
+
+        // Setup audio mixing
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        dest = audioCtx.createMediaStreamDestination();
+
+        // Route overlay video audio
+        const vSrc = audioCtx.createMediaElementSource(elements.video);
+        vSrc.connect(dest);
+        vSrc.connect(audioCtx.destination);
+
+        // Add microphone if checked
+        if (elements.micBox.checked) {
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+            });
+            const mSrc = audioCtx.createMediaStreamSource(micStream);
+            mSrc.connect(dest);
+          } catch (e) {
+            console.warn("Microphone access denied:", e);
+            alert("Microphone access denied. Recording without mic.");
+          }
+        }
+
+        // Create output stream
+        const outStream = new MediaStream([
+          videoTrack,
+          ...dest.stream.getAudioTracks(),
+        ]);
+        const mime = pickMime();
+
+        mediaRecorder = new MediaRecorder(outStream, {
+          mimeType: mime,
+          videoBitsPerSecond: 8_000_000,
+        });
+        chunks = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data && e.data.size) chunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, {
+            type: mediaRecorder.mimeType || "video/webm",
+          });
+          const url = URL.createObjectURL(blob);
+          elements.dl.href = url;
+          elements.dl.download = (mediaRecorder.mimeType || "").includes("mp4")
+            ? "ar-recording.mp4"
+            : "ar-recording.webm";
+          elements.dl.classList.add("show");
+
+          // Cleanup
+          cancelAnimationFrame(rafId);
+          if (micStream) {
+            micStream.getTracks().forEach((t) => t.stop());
+            micStream = null;
+          }
+          try {
+            audioCtx.close();
+          } catch (_) {}
+
+          // Update UI
+          state.recording = false;
+          elements.recBtn.classList.remove("recording");
+          elements.recIcon.textContent = "●";
+          elements.recText.textContent = "Record";
+          elements.recDuration.classList.remove("show");
+          clearInterval(durationInterval);
+        };
+
+        // Resume AudioContext if suspended
+        if (audioCtx.state === "suspended") await audioCtx.resume();
+
+        // Start recording
+        mediaRecorder.start();
+        state.recordingStartTime = Date.now();
+
+        // Update UI
+        elements.recBtn.classList.add("recording");
+        elements.recIcon.textContent = "⏹";
+        elements.recText.textContent = "Stop";
+        elements.dl.classList.remove("show");
+        elements.recDuration.classList.add("show");
+        elements.recDuration.textContent = "0:00";
+
+        // Start duration counter
+        durationInterval = setInterval(updateRecordingDuration, 1000);
+      }
+
+      function stopCompositeRecording() {
+        if (mediaRecorder && state.recording) {
+          mediaRecorder.stop();
+        }
+      }
+
+      // ==================== Event Listeners ====================
+
+      elements.recBtn.addEventListener("click", () => {
+        if (!state.recording) {
+          startCompositeRecording();
+        } else {
+          stopCompositeRecording();
+        }
+      });
+
+      // Prevent accidental page closure during recording
+      window.addEventListener("beforeunload", (e) => {
+        if (state.recording) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+    </script>
+  </body>
+</html>
