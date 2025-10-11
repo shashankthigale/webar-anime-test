@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Play/pause video on target found/lost
   marker.addEventListener('targetFound', () => {
+    overlayVideo.muted = false;
     overlayVideo.play();
   });
 
