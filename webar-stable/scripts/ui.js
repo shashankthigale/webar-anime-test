@@ -30,15 +30,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // === POINTER EVENTS FIX END ===
 
-  // Play/pause video on target found/lost
-  marker.addEventListener('targetFound', () => {
-    if (mediaUnlocked) {
-      overlayVideo.play();
-    }
-  });
+  // Wait for MindAR to be ready before attaching target listeners
+  arScene.addEventListener('arReady', () => {
+    // Play/pause video on target found/lost
+    marker.addEventListener('targetFound', () => {
+      if (mediaUnlocked) {
+        overlayVideo.play();
+      }
+    });
 
-  marker.addEventListener('targetLost', () => {
-    overlayVideo.pause();
+    marker.addEventListener('targetLost', () => {
+      overlayVideo.pause();
+    });
   });
   
   // Dev Tuning Panel
