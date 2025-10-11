@@ -43,6 +43,7 @@ class ARUI {
     this.createTuningPanel();
     this.setupEventListeners();
     this.setupTargetListeners();
+    this.setupManualStartButton();
 
     // Disable pointer events on scene until started
     this.disableScenePointerEvents();
@@ -100,6 +101,8 @@ class ARUI {
    */
   async startExperience() {
     try {
+      console.log('🚀 Starting AR experience...');
+
       // Unlock audio/video on iOS
       await this.unlockMedia();
 
@@ -114,78 +117,81 @@ class ARUI {
 
       this.isStarted = true;
 
-      // Initialize recorder
-      this.initRecorder();
+      // Try to start MindAR (will check for camera automatically)
+      try {
+        await this.startMindAR();
+      } catch (error) {
+        console.warn('Auto-start failed, scene may start manually:', error);
+        // Don't show error to user, let the scene start naturally
+      }
 
-      // Start MindAR scene (this starts the camera and begins tracking)
-      await this.startMindAR();
-
-      console.log('AR experience started');
+      console.log('✅ AR experience initialization complete');
     } catch (error) {
-      console.error('Failed to start AR experience:', error);
+      console.error('❌ Failed to start AR experience:', error);
+      alert('Failed to start AR experience. Please refresh and try again.');
     }
   }
 
   /**
-   * Start the MindAR scene and camera (using working reference approach)
+   * Start the MindAR scene and camera (simplified approach)
    * @private
    */
   async startMindAR() {
-    console.log('🎥 Starting MindAR using working reference approach...');
+    console.log('🎥 Starting MindAR...');
 
     const sceneEl = document.getElementById("ar-scene");
     const video = document.getElementById("overlay-video");
     const target = document.getElementById("video-target");
 
-    // Wait for arReady event (MindAR will start automatically with autoStart: false)
+    // Simple approach: wait a bit and check if camera started
     return new Promise((resolve, reject) => {
-      let cameraVideoEl = null;
+      let attempts = 0;
 
-      const arReadyHandler = async () => {
-        console.log('🎯 MindAR arReady event fired');
+      const checkCamera = () => {
+        attempts++;
+        console.log(`🔍 Checking for camera (attempt ${attempts})...`);
 
-        // Find the camera video element that MindAR created
+        // Find camera video element
         const vids = Array.from(document.querySelectorAll('video'));
-        cameraVideoEl = vids.find(v => v !== video && v.srcObject instanceof MediaStream);
+        const cameraVideoEl = vids.find(v => v !== video && v.srcObject instanceof MediaStream);
 
-        if (!cameraVideoEl) {
-          console.warn("📹 MindAR camera video not found yet");
-          return;
+        if (cameraVideoEl && cameraVideoEl.srcObject) {
+          const track = cameraVideoEl.srcObject.getVideoTracks()[0];
+          if (track && track.readyState === 'live') {
+            const settings = track.getSettings?.() || {};
+            console.log(`✅ Camera active: ${settings.width}x${settings.height}`);
+
+            // Initialize recorder
+            this.initRecorder();
+
+            // Set up target event listeners
+            target.addEventListener("targetFound", () => {
+              console.log('🎯 Target found - playing video');
+              if (this.audioUnlocked) video.play();
+            });
+
+            target.addEventListener("targetLost", () => {
+              console.log('👁️ Target lost - pausing video');
+              video.pause();
+            });
+
+            resolve();
+            return;
+          }
         }
 
-        const trackSettings = cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() || {};
-        console.log("📷 Camera ready:", trackSettings.width, "x", trackSettings.height);
-
-        // Initialize recorder with the camera video
-        this.initRecorder();
-
-        console.log('✅ MindAR started successfully');
-        resolve();
-      };
-
-      // Listen for arReady event
-      sceneEl.addEventListener("arReady", arReadyHandler);
-
-      // Also listen for target found/lost to control video playback
-      target.addEventListener("targetFound", () => {
-        console.log('🎯 Target found - playing video');
-        if (audioUnlocked) video.play();
-      });
-
-      target.addEventListener("targetLost", () => {
-        console.log('👁️ Target lost - pausing video');
-        video.pause();
-      });
-
-      // Set a timeout in case arReady never fires
-      setTimeout(() => {
-        if (!cameraVideoEl) {
-          const errorMsg = '⏰ MindAR arReady event timeout. Camera may not be available.';
+        if (attempts < 30) {
+          setTimeout(checkCamera, 500);
+        } else {
+          const errorMsg = '❌ Camera not found after 15 seconds. Check camera permissions.';
           console.error(errorMsg);
-          alert('Camera initialization timeout. Please check camera permissions and refresh.');
+          alert(errorMsg);
           reject(new Error(errorMsg));
         }
-      }, 10000);
+      };
+
+      // Start checking after a short delay
+      setTimeout(checkCamera, 1000);
     });
   }
 
@@ -521,6 +527,43 @@ class ARUI {
       marker.addEventListener('targetLost', () => {
         overlayVideo.pause();
       });
+    }
+  }
+
+  /**
+   * Set up manual start button for debugging
+   * @private
+   */
+  setupManualStartButton() {
+    // Add click listener to the A-Frame manual start button
+    setTimeout(() => {
+      const manualBtn = document.querySelector('#manual-start-btn');
+      if (manualBtn) {
+        manualBtn.addEventListener('click', () => {
+          console.log('🔴 Manual start button clicked');
+          this.forceStartCamera();
+        });
+      }
+    }, 3000); // Wait for A-Frame to load
+  }
+
+  /**
+   * Force start the camera (manual fallback)
+   * @private
+   */
+  async forceStartCamera() {
+    console.log('🔴 Force starting camera...');
+
+    try {
+      const scene = document.querySelector('a-scene[mindar-image]');
+      if (scene && scene.mindar) {
+        await scene.mindar.start();
+        console.log('✅ Camera force-started successfully');
+      } else {
+        console.warn('⚠️ MindAR not available for manual start');
+      }
+    } catch (error) {
+      console.error('❌ Failed to force start camera:', error);
     }
   }
 

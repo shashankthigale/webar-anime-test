@@ -61,6 +61,22 @@
         >
         </a-video>
       </a-entity>
+
+      <!-- Debug: Manual start button (in case auto-start fails) -->
+      <a-entity
+        position="0 0 -2"
+        geometry="plane: width: 0.5; height: 0.2"
+        material="color: red; transparent: true; opacity: 0.8"
+        id="manual-start-btn"
+      >
+        <a-text
+          value="Tap to Start Camera"
+          position="0 0 0.01"
+          align="center"
+          color="white"
+          width="2"
+        ></a-text>
+      </a-entity>
     </a-scene>
 
     <!-- Initialize the UI system when DOM is ready -->
@@ -85,13 +101,34 @@
         console.log("WebAR Image Tracking App initialized");
         console.log("A-Frame version:", AFRAME?.version);
 
-        // Check if libraries loaded after a delay
+        // Check initialization status
         setTimeout(() => {
-          console.log("🔍 Checking library status...");
+          console.log("🔍 Checking initialization status...");
           console.log("A-Frame loaded:", !!window.AFRAME);
+          console.log("Document ready state:", document.readyState);
 
           const scene = document.querySelector("a-scene[mindar-image]");
           console.log("MindAR scene element:", !!scene);
+
+          if (scene) {
+            console.log("Scene attributes:", scene.getAttributeNames());
+            console.log(
+              "Scene mindar-image value:",
+              scene.getAttribute("mindar-image")
+            );
+          }
+
+          // Check all video elements
+          const videos = document.querySelectorAll("video");
+          console.log(`Found ${videos.length} video elements:`);
+          videos.forEach((v, i) => {
+            console.log(`  Video ${i}:`, {
+              id: v.id,
+              src: v.src || "no src",
+              hasStream: !!(v.srcObject instanceof MediaStream),
+              readyState: v.readyState,
+            });
+          });
 
           if (!scene) {
             console.warn(
