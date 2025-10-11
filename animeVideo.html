@@ -256,6 +256,11 @@
       #capture-btn {
         width: 70px;
         height: 70px;
+        min-width: 70px;
+        min-height: 70px;
+        max-width: 70px;
+        max-height: 70px;
+        aspect-ratio: 1;
         border-radius: 50%;
         background: #fff;
         border: 5px solid rgba(255, 255, 255, 0.3);
@@ -268,6 +273,7 @@
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         pointer-events: auto;
         -webkit-tap-highlight-color: transparent;
+        flex-shrink: 0;
       }
       #capture-btn:hover {
         transform: scale(1.05);
@@ -280,13 +286,23 @@
       .capture-inner {
         width: 56px;
         height: 56px;
+        min-width: 56px;
+        min-height: 56px;
+        max-width: 56px;
+        max-height: 56px;
+        aspect-ratio: 1;
         background: #ef4444;
         border-radius: 50%;
         transition: all 0.3s ease;
+        flex-shrink: 0;
       }
       #capture-btn.recording .capture-inner {
         width: 28px;
         height: 28px;
+        min-width: 28px;
+        min-height: 28px;
+        max-width: 28px;
+        max-height: 28px;
         border-radius: 6px;
       }
 
@@ -348,14 +364,26 @@
         #capture-btn {
           width: 70px;
           height: 70px;
+          min-width: 70px;
+          min-height: 70px;
+          max-width: 70px;
+          max-height: 70px;
         }
         .capture-inner {
           width: 56px;
           height: 56px;
+          min-width: 56px;
+          min-height: 56px;
+          max-width: 56px;
+          max-height: 56px;
         }
         #capture-btn.recording .capture-inner {
           width: 28px;
           height: 28px;
+          min-width: 28px;
+          min-height: 28px;
+          max-width: 28px;
+          max-height: 28px;
         }
         #instructions {
           font-size: 14px;
