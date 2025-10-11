@@ -116,9 +116,43 @@ class ARUI {
       // Initialize recorder
       this.initRecorder();
 
+      // Start MindAR scene (this starts the camera and begins tracking)
+      await this.startMindAR();
+
       console.log('AR experience started');
     } catch (error) {
       console.error('Failed to start AR experience:', error);
+    }
+  }
+
+  /**
+   * Start the MindAR scene and camera
+   * @private
+   */
+  async startMindAR() {
+    const scene = document.querySelector('a-scene[mindar]');
+    if (!scene) {
+      throw new Error('MindAR scene not found');
+    }
+
+    try {
+      // Start MindAR (this will request camera permissions)
+      await scene.mindar.start();
+
+      console.log('MindAR started successfully');
+    } catch (error) {
+      console.error('Failed to start MindAR:', error);
+
+      // Provide user-friendly error message
+      if (error.message && error.message.includes('NotAllowedError')) {
+        alert('Camera access denied. Please allow camera permissions and refresh the page.');
+      } else if (error.message && error.message.includes('NotFoundError')) {
+        alert('No camera found. Please check your camera connection.');
+      } else {
+        alert('Failed to start AR experience. Please check camera permissions and try again.');
+      }
+
+      throw error;
     }
   }
 
