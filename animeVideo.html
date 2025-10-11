@@ -407,6 +407,11 @@
         overflow: hidden !important;
       }
 
+      /* Ensure A-Frame canvas maintains aspect ratio */
+      a-scene canvas {
+        object-fit: cover !important;
+      }
+
       /* Ensure UI overlays are above the scene */
       #loading-indicator,
       #tracking-status,
@@ -476,7 +481,7 @@
       mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.0001; filterBeta:1000; warmupTolerance:5; missTolerance:5"
       embedded
       color-space="sRGB"
-      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true"
+      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp"
       vr-mode-ui="enabled: false"
       device-orientation-permission-ui="enabled: true"
       id="ar-scene"
@@ -720,11 +725,25 @@
       function sizeMixCanvas() {
         const camW = cameraVideoEl?.videoWidth || 0;
         const camH = cameraVideoEl?.videoHeight || 0;
-        const sceneCanvas = elements.sceneEl.canvas;
-        const w = camW || sceneCanvas?.width || 1280;
-        const h = camH || sceneCanvas?.height || 720;
+
+        // Always use camera dimensions for recording to maintain aspect ratio
+        const w = camW || 1280;
+        const h = camH || 720;
+
         elements.mixCanvas.width = w;
         elements.mixCanvas.height = h;
+
+        console.log(
+          "Recording canvas sized to:",
+          w,
+          "x",
+          h,
+          "Camera:",
+          camW,
+          "x",
+          camH
+        );
+
         if (!mixCtx)
           mixCtx = elements.mixCanvas.getContext("2d", {
             alpha: true,
@@ -742,21 +761,36 @@
         }
 
         try {
-          // Draw camera feed
+          const canvasW = elements.mixCanvas.width;
+          const canvasH = elements.mixCanvas.height;
+
+          // Clear canvas
+          mixCtx.clearRect(0, 0, canvasW, canvasH);
+
+          // Draw camera feed at native resolution (no stretching)
           mixCtx.drawImage(
             cameraVideoEl,
             0,
             0,
-            elements.mixCanvas.width,
-            elements.mixCanvas.height
+            cameraVideoEl.videoWidth,
+            cameraVideoEl.videoHeight,
+            0,
+            0,
+            canvasW,
+            canvasH
           );
-          // Draw AR overlays on top
+
+          // Draw AR overlays on top, scaled to match camera dimensions
           mixCtx.drawImage(
             sceneCanvas,
             0,
             0,
-            elements.mixCanvas.width,
-            elements.mixCanvas.height
+            sceneCanvas.width,
+            sceneCanvas.height,
+            0,
+            0,
+            canvasW,
+            canvasH
           );
         } catch (e) {
           console.warn("Composite draw failed:", e);
@@ -786,6 +820,26 @@
         // Size mixer canvas
         sizeMixCanvas();
 
+        // Log dimensions for debugging
+        console.log(
+          "Camera video dimensions:",
+          cameraVideoEl.videoWidth,
+          "x",
+          cameraVideoEl.videoHeight
+        );
+        console.log(
+          "Scene canvas dimensions:",
+          elements.sceneEl.canvas.width,
+          "x",
+          elements.sceneEl.canvas.height
+        );
+        console.log(
+          "Mix canvas dimensions:",
+          elements.mixCanvas.width,
+          "x",
+          elements.mixCanvas.height
+        );
+
         // Start composite drawing
         cancelAnimationFrame(rafId);
         state.recording = true;
@@ -795,6 +849,8 @@
         const videoTrack = elements.mixCanvas
           .captureStream(30)
           .getVideoTracks()[0];
+
+        console.log("Recording track settings:", videoTrack.getSettings());
 
         // Setup audio mixing
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -824,10 +880,14 @@
         ]);
         const mime = pickMime();
 
-        mediaRecorder = new MediaRecorder(outStream, {
+        const recordingOptions = {
           mimeType: mime,
           videoBitsPerSecond: 8_000_000,
-        });
+        };
+
+        console.log("MediaRecorder options:", recordingOptions);
+
+        mediaRecorder = new MediaRecorder(outStream, recordingOptions);
         chunks = [];
 
         mediaRecorder.ondataavailable = (e) => {
@@ -839,6 +899,18 @@
             type: mediaRecorder.mimeType || "video/webm",
           });
           const url = URL.createObjectURL(blob);
+
+          console.log(
+            "Recording stopped. Blob size:",
+            (blob.size / 1024 / 1024).toFixed(2),
+            "MB"
+          );
+          console.log(
+            "Recording dimensions were:",
+            elements.mixCanvas.width,
+            "x",
+            elements.mixCanvas.height
+          );
 
           // Auto-download the recording
           const downloadLink = document.createElement("a");
