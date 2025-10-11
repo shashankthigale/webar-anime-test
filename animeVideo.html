@@ -186,123 +186,130 @@
         }
       }
 
-      /* Recording Controls */
+      /* Camera-Style Controls */
       #rec-controls {
         position: fixed;
-        bottom: 20px;
+        bottom: 40px;
         left: 50%;
         transform: translateX(-50%);
         z-index: 9999;
         display: flex;
         flex-direction: column;
-        gap: 12px;
         align-items: center;
-        transition: all 0.3s ease;
+        gap: 20px;
       }
 
-      .controls-row {
+      /* Recording Duration & Status */
+      #rec-status {
         display: flex;
-        gap: 12px;
         align-items: center;
+        gap: 12px;
         background: rgba(0, 0, 0, 0.75);
-        padding: 12px 16px;
-        border-radius: 50px;
+        padding: 10px 20px;
+        border-radius: 25px;
         backdrop-filter: blur(10px);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+      #rec-status.show {
+        opacity: 1;
       }
 
-      #rec-toggle {
-        padding: 14px 28px;
-        border: 0;
-        border-radius: 50px;
+      .rec-indicator {
+        width: 12px;
+        height: 12px;
         background: #ef4444;
-        color: #fff;
-        cursor: pointer;
-        font-size: 16px;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        transition: all 0.2s;
-        box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        border-radius: 50%;
+        animation: recordingPulse 1.5s ease-in-out infinite;
       }
-      #rec-toggle:hover {
-        transform: scale(1.05);
-        box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
-      }
-      #rec-toggle.recording {
-        background: #dc2626;
-        animation: recordPulse 1.5s ease-in-out infinite;
-      }
-      @keyframes recordPulse {
+      @keyframes recordingPulse {
         0%,
         100% {
-          box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+          opacity: 1;
+          transform: scale(1);
         }
         50% {
-          box-shadow: 0 4px 25px rgba(239, 68, 68, 0.8);
+          opacity: 0.5;
+          transform: scale(0.8);
         }
       }
 
       #rec-duration {
         font-size: 18px;
         font-weight: 600;
-        color: #ef4444;
-        min-width: 60px;
-        text-align: center;
-        display: none;
-      }
-      #rec-duration.show {
-        display: block;
+        color: #fff;
+        min-width: 50px;
+        font-variant-numeric: tabular-nums;
       }
 
-      #mic-label {
-        background: rgba(0, 0, 0, 0.6);
-        color: #fff;
-        padding: 8px 16px;
-        border-radius: 50px;
+      /* Camera Capture Button */
+      #capture-btn {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: #fff;
+        border: 5px solid rgba(255, 255, 255, 0.3);
         cursor: pointer;
+        position: relative;
+        transition: all 0.2s ease;
         display: flex;
         align-items: center;
-        gap: 8px;
-        transition: background 0.2s;
+        justify-content: center;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
       }
-      #mic-label:hover {
-        background: rgba(0, 0, 0, 0.8);
+      #capture-btn:hover {
+        transform: scale(1.1);
       }
-      #include-mic {
-        cursor: pointer;
+      #capture-btn:active {
+        transform: scale(0.95);
       }
 
+      /* Inner circle (red for record, transitions to square for stop) */
+      .capture-inner {
+        width: 64px;
+        height: 64px;
+        background: #ef4444;
+        border-radius: 50%;
+        transition: all 0.3s ease;
+      }
+      #capture-btn.recording .capture-inner {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+      }
+
+      /* Download Button */
       #dl {
-        background: #10b981;
+        background: rgba(0, 0, 0, 0.75);
         color: #fff;
-        padding: 14px 28px;
-        border-radius: 50px;
+        padding: 12px 24px;
+        border-radius: 25px;
         text-decoration: none;
         font-weight: 600;
+        font-size: 15px;
         display: none;
-        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
         transition: all 0.2s;
+        gap: 8px;
+        align-items: center;
       }
       #dl.show {
-        display: inline-block;
-        animation: bounceIn 0.5s ease;
+        display: flex;
+        animation: slideUpFade 0.5s ease;
       }
       #dl:hover {
-        transform: scale(1.05);
-        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+        background: rgba(0, 0, 0, 0.9);
+        transform: translateY(-2px);
       }
-      @keyframes bounceIn {
-        0% {
-          transform: scale(0.8);
+      @keyframes slideUpFade {
+        from {
           opacity: 0;
+          transform: translateY(10px);
         }
-        50% {
-          transform: scale(1.05);
-        }
-        100% {
-          transform: scale(1);
+        to {
           opacity: 1;
+          transform: translateY(0);
         }
       }
 
@@ -353,17 +360,21 @@
           padding: 14px 36px;
           font-size: 16px;
         }
-        #rec-toggle {
-          padding: 12px 24px;
-          font-size: 15px;
+        #capture-btn {
+          width: 70px;
+          height: 70px;
+        }
+        .capture-inner {
+          width: 56px;
+          height: 56px;
+        }
+        #capture-btn.recording .capture-inner {
+          width: 28px;
+          height: 28px;
         }
         #instructions {
           font-size: 14px;
-          bottom: 120px;
-        }
-        .controls-row {
-          flex-direction: column;
-          border-radius: 20px;
+          bottom: 140px;
         }
       }
 
@@ -402,22 +413,16 @@
       Move slowly and keep the target in view
     </div>
 
-    <!-- Recording Controls -->
+    <!-- Camera-Style Recording Controls -->
     <div id="rec-controls">
-      <div class="controls-row">
-        <button id="rec-toggle">
-          <span id="rec-icon">●</span>
-          <span id="rec-text">Record</span>
-        </button>
+      <div id="rec-status">
+        <div class="rec-indicator"></div>
         <span id="rec-duration">0:00</span>
       </div>
-      <div class="controls-row">
-        <label id="mic-label">
-          <input id="include-mic" type="checkbox" />
-          <span>🎤 Include Microphone</span>
-        </label>
-        <a id="dl">⬇ Download Video</a>
-      </div>
+      <button id="capture-btn">
+        <div class="capture-inner"></div>
+      </button>
+      <a id="dl">⬇ Download Recording</a>
     </div>
 
     <!-- Countdown Overlay -->
@@ -430,7 +435,7 @@
 
     <!-- A-Frame Scene -->
     <a-scene
-      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.05; filterBeta:40; warmupTolerance:3; missTolerance:3"
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.001; filterBeta:10000; warmupTolerance:5; missTolerance:5"
       embedded
       color-space="sRGB"
       renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true"
@@ -483,12 +488,10 @@
         statusText: document.getElementById("status-text"),
         statusDot: document.querySelector(".status-dot"),
         instructions: document.getElementById("instructions"),
-        recBtn: document.getElementById("rec-toggle"),
-        recIcon: document.getElementById("rec-icon"),
-        recText: document.getElementById("rec-text"),
+        captureBtn: document.getElementById("capture-btn"),
+        recStatus: document.getElementById("rec-status"),
         recDuration: document.getElementById("rec-duration"),
         dl: document.getElementById("dl"),
-        micBox: document.getElementById("include-mic"),
         countdownOverlay: document.getElementById("countdown-overlay"),
         countdownNumber: document.getElementById("countdown-number"),
         sceneEl: document.getElementById("ar-scene"),
@@ -764,18 +767,16 @@
         vSrc.connect(dest);
         vSrc.connect(audioCtx.destination);
 
-        // Add microphone if checked
-        if (elements.micBox.checked) {
-          try {
-            micStream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-            });
-            const mSrc = audioCtx.createMediaStreamSource(micStream);
-            mSrc.connect(dest);
-          } catch (e) {
-            console.warn("Microphone access denied:", e);
-            alert("Microphone access denied. Recording without mic.");
-          }
+        // Always include microphone
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          const mSrc = audioCtx.createMediaStreamSource(micStream);
+          mSrc.connect(dest);
+        } catch (e) {
+          console.warn("Microphone access denied:", e);
+          // Continue recording without mic
         }
 
         // Create output stream
@@ -816,12 +817,10 @@
             audioCtx.close();
           } catch (_) {}
 
-          // Update UI
+          // Update UI - back to camera mode
           state.recording = false;
-          elements.recBtn.classList.remove("recording");
-          elements.recIcon.textContent = "●";
-          elements.recText.textContent = "Record";
-          elements.recDuration.classList.remove("show");
+          elements.captureBtn.classList.remove("recording");
+          elements.recStatus.classList.remove("show");
           clearInterval(durationInterval);
         };
 
@@ -832,12 +831,10 @@
         mediaRecorder.start();
         state.recordingStartTime = Date.now();
 
-        // Update UI
-        elements.recBtn.classList.add("recording");
-        elements.recIcon.textContent = "⏹";
-        elements.recText.textContent = "Stop";
+        // Update UI - show recording state
+        elements.captureBtn.classList.add("recording");
+        elements.recStatus.classList.add("show");
         elements.dl.classList.remove("show");
-        elements.recDuration.classList.add("show");
         elements.recDuration.textContent = "0:00";
 
         // Start duration counter
@@ -852,7 +849,7 @@
 
       // ==================== Event Listeners ====================
 
-      elements.recBtn.addEventListener("click", () => {
+      elements.captureBtn.addEventListener("click", () => {
         if (!state.recording) {
           startCompositeRecording();
         } else {
