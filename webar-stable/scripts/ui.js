@@ -18,6 +18,7 @@ class ARUI {
     this.isStarted = false;
     this.recorder = null;
     this.recordingBlob = null;
+    this.audioUnlocked = false; // Track if audio/video is unlocked for iOS
 
     // Dev tuning panel state (persisted in localStorage)
     this.tuningParams = {
@@ -126,117 +127,66 @@ class ARUI {
   }
 
   /**
-   * Start the MindAR scene and camera
+   * Start the MindAR scene and camera (using working reference approach)
    * @private
    */
   async startMindAR() {
-    console.log('🎥 Attempting to start MindAR...');
+    console.log('🎥 Starting MindAR using working reference approach...');
 
-    // Wait for MindAR library to be fully loaded
-    let attempts = 0;
-    while (typeof window.MINDAR === 'undefined' && attempts < 50) {
-      console.log('⏳ Waiting for MindAR library to load...');
-      await new Promise(resolve => setTimeout(resolve, 100));
-      attempts++;
-    }
+    const sceneEl = document.getElementById("ar-scene");
+    const video = document.getElementById("overlay-video");
+    const target = document.getElementById("video-target");
 
-    if (typeof window.MINDAR === 'undefined') {
-      const errorMsg = '❌ MindAR library failed to load. Please check your internet connection and refresh the page.';
-      console.error(errorMsg);
-      alert(errorMsg);
-      throw new Error(errorMsg);
-    }
+    // Wait for arReady event (MindAR will start automatically with autoStart: false)
+    return new Promise((resolve, reject) => {
+      let cameraVideoEl = null;
 
-    console.log('✅ MindAR library is available');
+      const arReadyHandler = async () => {
+        console.log('🎯 MindAR arReady event fired');
 
-    // First, check if camera API is available
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const errorMsg = '❌ Camera API not supported by this browser. Please use a modern browser like Chrome, Firefox, or Safari.';
-      console.error(errorMsg);
-      alert(errorMsg);
-      throw new Error(errorMsg);
-    }
+        // Find the camera video element that MindAR created
+        const vids = Array.from(document.querySelectorAll('video'));
+        cameraVideoEl = vids.find(v => v !== video && v.srcObject instanceof MediaStream);
 
-    // Test camera access before starting MindAR
-    try {
-      console.log('🔍 Testing camera access...');
-      const testStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        if (!cameraVideoEl) {
+          console.warn("📹 MindAR camera video not found yet");
+          return;
+        }
+
+        const trackSettings = cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() || {};
+        console.log("📷 Camera ready:", trackSettings.width, "x", trackSettings.height);
+
+        // Initialize recorder with the camera video
+        this.initRecorder();
+
+        console.log('✅ MindAR started successfully');
+        resolve();
+      };
+
+      // Listen for arReady event
+      sceneEl.addEventListener("arReady", arReadyHandler);
+
+      // Also listen for target found/lost to control video playback
+      target.addEventListener("targetFound", () => {
+        console.log('🎯 Target found - playing video');
+        if (audioUnlocked) video.play();
       });
-      // Immediately stop the test stream
-      testStream.getTracks().forEach(track => track.stop());
-      console.log('✅ Camera access test successful');
-    } catch (testError) {
-      console.error('❌ Camera access test failed:', testError);
-      if (testError.name === 'NotAllowedError') {
-        const errorMsg = '🚫 Camera access denied. Please allow camera permissions in your browser settings and refresh the page.';
-        console.error(errorMsg);
-        alert(errorMsg);
-        throw testError;
-      } else if (testError.name === 'NotFoundError') {
-        const errorMsg = '📷 No camera found. Please check your camera connection.';
-        console.error(errorMsg);
-        alert(errorMsg);
-        throw testError;
-      }
-    }
 
-    const scene = document.querySelector('a-scene[mindar]');
-    if (!scene) {
-      const errorMsg = '❌ MindAR scene not found. Check if A-Frame and MindAR loaded properly.';
-      console.error(errorMsg);
-      alert(errorMsg);
-      throw new Error(errorMsg);
-    }
+      target.addEventListener("targetLost", () => {
+        console.log('👁️ Target lost - pausing video');
+        video.pause();
+      });
 
-    console.log('✅ MindAR scene found, attempting to start...');
-
-    // Check if MindAR is properly initialized
-    if (!scene.mindar) {
-      const errorMsg = '❌ MindAR not initialized on scene. Check CDN links and loading order.';
-      console.error(errorMsg);
-      alert(errorMsg);
-      throw new Error(errorMsg);
-    }
-
-    try {
-      console.log('🚀 Calling scene.mindar.start()...');
-
-      // Start MindAR (this will request camera permissions)
-      await scene.mindar.start();
-
-      console.log('✅ MindAR started successfully');
-    } catch (error) {
-      console.error('❌ Failed to start MindAR. Full error:', error);
-      console.error('Error name:', error.name);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-
-      // More specific error handling
-      if (error.name === 'NotAllowedError' || error.message?.includes('NotAllowedError')) {
-        const errorMsg = '🚫 Camera access denied. Please allow camera permissions in your browser and refresh the page.';
-        console.error(errorMsg);
-        alert(errorMsg);
-      } else if (error.name === 'NotFoundError' || error.message?.includes('NotFoundError')) {
-        const errorMsg = '📷 No camera found. Please check your camera connection and try again.';
-        console.error(errorMsg);
-        alert(errorMsg);
-      } else if (error.name === 'NotSupportedError' || error.message?.includes('NotSupportedError')) {
-        const errorMsg = '⚠️ Camera not supported by this browser. Try a different browser or device.';
-        console.error(errorMsg);
-        alert(errorMsg);
-      } else if (error.message?.includes('targets.mind')) {
-        const errorMsg = '🎯 Target file issue. Please check that targets.mind is properly generated from your image.';
-        console.error(errorMsg);
-        alert(errorMsg);
-      } else {
-        const errorMsg = `⚠️ AR experience failed to start. Error: ${error.message || 'Unknown error'}. Please check camera permissions and try again.`;
-        console.error(errorMsg);
-        alert(errorMsg);
-      }
-
-      throw error;
-    }
+      // Set a timeout in case arReady never fires
+      setTimeout(() => {
+        if (!cameraVideoEl) {
+          const errorMsg = '⏰ MindAR arReady event timeout. Camera may not be available.';
+          console.error(errorMsg);
+          alert('Camera initialization timeout. Please check camera permissions and refresh.');
+          reject(new Error(errorMsg));
+        }
+      }, 10000);
+    });
   }
 
   /**
@@ -251,6 +201,7 @@ class ARUI {
         await overlayVideo.play();
         overlayVideo.pause();
         overlayVideo.currentTime = 0;
+        console.log('✅ Overlay video unlocked');
       } catch (error) {
         console.warn('Could not unlock overlay video:', error);
       }
@@ -259,12 +210,18 @@ class ARUI {
     // Create and immediately suspend audio context to unlock audio
     if (window.AudioContext || window.webkitAudioContext) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      const audioContext = new AudioCtx();
-
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume();
+      try {
+        const audioContext = new AudioCtx();
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+          console.log('✅ Audio context unlocked');
+        }
+      } catch (error) {
+        console.warn('Could not unlock audio context:', error);
       }
     }
+
+    this.audioUnlocked = true;
   }
 
   /**

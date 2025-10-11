@@ -5,29 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebAR Image Tracking Experience</title>
 
-    <!-- Load A-Frame first -->
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-
-    <!-- THREE.js for additional utilities -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
-
-    <!-- Load MindAR after A-Frame (using more reliable CDN) -->
-    <script src="https://unpkg.com/mindar-image-aframe@1.2.5/dist/mindar-image-aframe.prod.js"></script>
-
-    <!-- Fallback for MindAR loading -->
-    <script>
-      // Check if MindAR loaded properly
-      setTimeout(() => {
-        if (typeof window.MINDAR === "undefined") {
-          console.error("❌ MindAR library failed to load");
-          alert(
-            "Failed to load MindAR library. Please check your internet connection and refresh the page."
-          );
-        } else {
-          console.log("✅ MindAR library loaded successfully");
-        }
-      }, 3000);
-    </script>
+    <!-- A-Frame + extras + MindAR (working combination from reference) -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
     <!-- Application styles and scripts -->
     <link rel="stylesheet" href="./styles/app.css" />
@@ -42,10 +23,13 @@
 
     <!-- A-Frame scene with MindAR image tracking -->
     <a-scene
-      mindar="imageTargetSrc: ./assets/targets.mind; filterMinCF: 0.02; filterBeta: 60; warmupTolerance: 3; missTolerance: 3;"
-      renderer="logarithmicDepthBuffer: true; colorManagement: true;"
+      mindar-image="imageTargetSrc: ./assets/targets.mind; autoStart: false; uiScanning: true; uiLoading: true; filterMinCF:0.05; filterBeta:40; warmupTolerance:3; missTolerance:3"
+      embedded
+      color-space="sRGB"
+      renderer="colorManagement: true, physicallyCorrectLights"
       vr-mode-ui="enabled: false"
-      device-orientation-permission-ui="enabled: false"
+      device-orientation-permission-ui="enabled: true"
+      id="ar-scene"
     >
       <!-- Assets for the AR experience -->
       <a-assets>
@@ -65,46 +49,16 @@
       <!-- Camera entity with MindAR -->
       <a-camera look-controls="enabled: false"></a-camera>
 
-      <!-- Image target entity with smooth-follow component -->
-      <!--
-            MindAR Configuration Notes:
-            - filterMinCF: Minimum cutoff frequency for One-Euro filter (lower = more smoothing but more lag)
-            - filterBeta: Speed coefficient for adaptive cutoff (higher = more responsive to fast motion)
-            - warmupTolerance: Frames to wait before considering target found (higher = more stable detection)
-            - missTolerance: Frames to wait before considering target lost (higher = more stable tracking)
-
-            Tuning Guidelines:
-            1. Start with filterMinCF around 0.02 and filterBeta around 60
-            2. Lower filterMinCF to reduce jitter at slow motions, but watch for added lag
-            3. Increase filterBeta to improve responsiveness during fast motion
-            4. Adjust warmupTolerance/missTolerance based on target stability requirements
-        -->
-      <a-entity mindar-image-target="targetIndex: 0">
-        <!-- Video plane that follows the tracked marker with smoothing -->
-        <!--
-                Smooth-Follow Component Notes:
-                - anchor: The marker entity to follow
-                - overscan: Scale multiplier to hide edge wobble (1.02-1.03 recommended)
-                - alphaMin: Minimum lerp factor for slow motions (lower = more smoothing)
-                - alphaMax: Maximum lerp factor for fast motions (higher = more responsive)
-
-                The component implements double smoothing:
-                1. MindAR's built-in One-Euro filter on marker pose
-                2. Content-side One-Euro filter on the placed media node
-            -->
+      <!-- Image target entity -->
+      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
         <a-video
           id="video-plane"
           src="#overlay-video"
-          width="1"
-          height="0.5625"
-          <!--
-          16:9
-          aspect
-          ratio
-          --
+          width="1.3"
+          height="1.7"
+          position="0 0 0"
+          rotation="0 0 0"
         >
-          position="0 0 0" smooth-follow="anchor: #marker; overscan: 1.02;
-          alphaMin: 0.12; alphaMax: 0.22">
         </a-video>
       </a-entity>
     </a-scene>
@@ -131,29 +85,20 @@
         console.log("WebAR Image Tracking App initialized");
         console.log("A-Frame version:", AFRAME?.version);
 
-        // Check if MindAR loaded after a delay
+        // Check if libraries loaded after a delay
         setTimeout(() => {
-          console.log("🔍 Checking MindAR status...");
-          console.log("MindAR global available:", !!window.MINDAR);
+          console.log("🔍 Checking library status...");
+          console.log("A-Frame loaded:", !!window.AFRAME);
 
-          const scene = document.querySelector("a-scene[mindar]");
+          const scene = document.querySelector("a-scene[mindar-image]");
           console.log("MindAR scene element:", !!scene);
-          console.log("MindAR instance:", !!scene?.mindar);
 
-          if (!window.MINDAR) {
-            console.warn("⚠️ MindAR library not loaded. Check CDN connection.");
-          }
           if (!scene) {
             console.warn(
-              "⚠️ MindAR scene not found. Check if A-Frame loaded correctly."
+              "⚠️ MindAR scene not found. Check if all libraries loaded correctly."
             );
           }
-          if (!scene?.mindar) {
-            console.warn(
-              "⚠️ MindAR not initialized on scene. Check loading order."
-            );
-          }
-        }, 3000);
+        }, 2000);
       });
 
       // Error handling for unsupported browsers
