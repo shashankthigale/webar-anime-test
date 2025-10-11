@@ -5,12 +5,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const videoPlane = document.getElementById('video-plane');
   const overlayVideo = document.getElementById('overlay-video');
   const marker = document.getElementById('marker');
+  let mediaUnlocked = false;
 
   // === POINTER EVENTS FIX START ===
-  startButton.addEventListener('click', () => {
+  startButton.addEventListener('click', async () => {
     // On iOS, video and audio require a user gesture to start.
-    overlayVideo.play();
-    overlayVideo.pause(); 
+    // We play and immediately pause the video to "unlock" it.
+    try {
+      await overlayVideo.play();
+      overlayVideo.pause();
+      overlayVideo.currentTime = 0;
+      mediaUnlocked = true;
+    } catch (e) {
+      console.error("Video play failed:", e);
+    }
     
     startOverlay.style.display = 'none';
     arScene.style.pointerEvents = 'auto';
@@ -24,8 +32,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Play/pause video on target found/lost
   marker.addEventListener('targetFound', () => {
-    overlayVideo.muted = false;
-    overlayVideo.play();
+    if (mediaUnlocked) {
+      overlayVideo.play();
+    }
   });
 
   marker.addEventListener('targetLost', () => {
