@@ -3,7 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <title>AR Experience — Image Tracking + Recording</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
 
     <!-- A-Frame + extras + MindAR -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -189,7 +192,7 @@
       /* Camera-Style Controls */
       #rec-controls {
         position: fixed;
-        bottom: 40px;
+        bottom: max(40px, env(safe-area-inset-bottom, 20px));
         left: 50%;
         transform: translateX(-50%);
         z-index: 9999;
@@ -197,6 +200,7 @@
         flex-direction: column;
         align-items: center;
         gap: 20px;
+        pointer-events: auto;
       }
 
       /* Recording Duration & Status */
@@ -244,18 +248,20 @@
 
       /* Camera Capture Button */
       #capture-btn {
-        width: 120px;
-        height: 120px;
+        width: 70px;
+        height: 70px;
         border-radius: 50%;
         background: #fff;
-        border: 7px solid rgba(255, 255, 255, 0.3);
+        border: 5px solid rgba(255, 255, 255, 0.3);
         cursor: pointer;
         position: relative;
         transition: all 0.2s ease;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 6px 25px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        pointer-events: auto;
+        -webkit-tap-highlight-color: transparent;
       }
       #capture-btn:hover {
         transform: scale(1.05);
@@ -266,16 +272,16 @@
 
       /* Inner circle (red for record, transitions to square for stop) */
       .capture-inner {
-        width: 96px;
-        height: 96px;
+        width: 56px;
+        height: 56px;
         background: #ef4444;
         border-radius: 50%;
         transition: all 0.3s ease;
       }
       #capture-btn.recording .capture-inner {
-        width: 48px;
-        height: 48px;
-        border-radius: 8px;
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
       }
 
       /* Download Button - Hidden (auto-downloads) */
@@ -331,26 +337,45 @@
           font-size: 16px;
         }
         #capture-btn {
-          width: 110px;
-          height: 110px;
+          width: 70px;
+          height: 70px;
         }
         .capture-inner {
-          width: 88px;
-          height: 88px;
+          width: 56px;
+          height: 56px;
         }
         #capture-btn.recording .capture-inner {
-          width: 44px;
-          height: 44px;
+          width: 28px;
+          height: 28px;
         }
         #instructions {
           font-size: 14px;
-          bottom: 150px;
+          bottom: 120px;
         }
       }
 
       /* Hidden mixer canvas */
       #mix-canvas {
         display: none;
+      }
+
+      /* A-Frame Scene - Ensure it doesn't block UI controls */
+      a-scene {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+      }
+
+      /* Ensure UI overlays are above the scene */
+      #loading-indicator,
+      #tracking-status,
+      #instructions,
+      #rec-controls,
+      #countdown-overlay {
+        pointer-events: auto;
       }
     </style>
   </head>
