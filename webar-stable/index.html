@@ -5,12 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebAR Image Tracking Experience</title>
 
-    <!-- A-Frame and MindAR CDN -->
+    <!-- Load A-Frame first -->
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mindar-image-aframe@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
     <!-- THREE.js for additional utilities -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
+
+    <!-- Load MindAR after A-Frame (using more reliable CDN) -->
+    <script src="https://unpkg.com/mindar-image-aframe@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+    <!-- Fallback for MindAR loading -->
+    <script>
+      // Check if MindAR loaded properly
+      setTimeout(() => {
+        if (typeof window.MINDAR === "undefined") {
+          console.error("❌ MindAR library failed to load");
+          alert(
+            "Failed to load MindAR library. Please check your internet connection and refresh the page."
+          );
+        } else {
+          console.log("✅ MindAR library loaded successfully");
+        }
+      }, 3000);
+    </script>
 
     <!-- Application styles and scripts -->
     <link rel="stylesheet" href="./styles/app.css" />
@@ -116,13 +133,19 @@
 
         // Check if MindAR loaded after a delay
         setTimeout(() => {
+          console.log("🔍 Checking MindAR status...");
+          console.log("MindAR global available:", !!window.MINDAR);
+
           const scene = document.querySelector("a-scene[mindar]");
           console.log("MindAR scene element:", !!scene);
           console.log("MindAR instance:", !!scene?.mindar);
 
+          if (!window.MINDAR) {
+            console.warn("⚠️ MindAR library not loaded. Check CDN connection.");
+          }
           if (!scene) {
             console.warn(
-              "⚠️ MindAR scene not found. Check if MindAR library loaded correctly."
+              "⚠️ MindAR scene not found. Check if A-Frame loaded correctly."
             );
           }
           if (!scene?.mindar) {
@@ -130,7 +153,7 @@
               "⚠️ MindAR not initialized on scene. Check loading order."
             );
           }
-        }, 2000);
+        }, 3000);
       });
 
       // Error handling for unsupported browsers

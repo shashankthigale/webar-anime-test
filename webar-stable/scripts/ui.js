@@ -132,6 +132,23 @@ class ARUI {
   async startMindAR() {
     console.log('🎥 Attempting to start MindAR...');
 
+    // Wait for MindAR library to be fully loaded
+    let attempts = 0;
+    while (typeof window.MINDAR === 'undefined' && attempts < 50) {
+      console.log('⏳ Waiting for MindAR library to load...');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      attempts++;
+    }
+
+    if (typeof window.MINDAR === 'undefined') {
+      const errorMsg = '❌ MindAR library failed to load. Please check your internet connection and refresh the page.';
+      console.error(errorMsg);
+      alert(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    console.log('✅ MindAR library is available');
+
     // First, check if camera API is available
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       const errorMsg = '❌ Camera API not supported by this browser. Please use a modern browser like Chrome, Firefox, or Safari.';
