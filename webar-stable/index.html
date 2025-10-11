@@ -1,243 +1,156 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WebAR Image Tracking - Corrected</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebAR Image Tracking Experience</title>
 
-    <!-- Updated library versions to match working reference -->
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <!-- A-Frame and MindAR CDN -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mindar-image-aframe@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
+    <!-- THREE.js for additional utilities -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
+
+    <!-- Application styles and scripts -->
     <link rel="stylesheet" href="./styles/app.css" />
     <script src="./scripts/smoothing.js"></script>
+    <script src="./scripts/recorder.js"></script>
+    <script src="./scripts/ui.js"></script>
   </head>
   <body>
-    <!-- UI elements from original implementation -->
-    <div id="start-overlay">
-      <button id="start-button">Tap to Start</button>
-    </div>
-    <div id="controls">
-      <button id="record-button">Record</button>
-      <label><input type="checkbox" id="mic-checkbox" /> Include Mic</label>
-      <a id="download-link" style="display: none">Download</a>
-    </div>
-    <div id="dev-panel" style="display: none">
-      <h3>Tuning Panel</h3>
-      <div>
-        <label
-          >filterMinCF:
-          <input type="number" id="filterMinCF" step="0.001" value="0.02"
-        /></label>
-      </div>
-      <div>
-        <label
-          >filterBeta: <input type="number" id="filterBeta" step="1" value="60"
-        /></label>
-      </div>
-      <div>
-        <label
-          >alphaMin:
-          <input type="number" id="alphaMin" step="0.01" value="0.12"
-        /></label>
-      </div>
-      <div>
-        <label
-          >alphaMax:
-          <input type="number" id="alphaMax" step="0.01" value="0.22"
-        /></label>
-      </div>
-      <div>
-        <label
-          >overscan:
-          <input type="number" id="overscan" step="0.01" value="1.02"
-        /></label>
-      </div>
-      <div>
-        <label
-          >Smoother: <input type="checkbox" id="smoother-toggle" checked
-        /></label>
-      </div>
-      <button id="reset-tuning">Reset</button>
-    </div>
+    <!-- Hidden canvas for composite recording -->
+    <!-- This canvas is used by the recorder to mix camera feed with AR overlays -->
     <canvas id="mix-canvas" style="display: none"></canvas>
 
-    <!-- A-Frame Scene, attributes corrected to match working reference -->
+    <!-- A-Frame scene with MindAR image tracking -->
     <a-scene
-      mindar-image="imageTargetSrc: ./assets/targets.mind; autoStart: true; uiScanning: true; uiLoading: true; filterMinCF:0.02; filterBeta:60; warmupTolerance:3; missTolerance:3"
-      embedded
-      color-space="sRGB"
-      renderer="colorManagement: true, physicallyCorrectLights"
+      mindar="imageTargetSrc: ./assets/targets.mind; filterMinCF: 0.02; filterBeta: 60; warmupTolerance: 3; missTolerance: 3;"
+      renderer="logarithmicDepthBuffer: true; colorManagement: true;"
       vr-mode-ui="enabled: false"
-      device-orientation-permission-ui="enabled: true"
-      id="ar-scene"
+      device-orientation-permission-ui="enabled: false"
     >
+      <!-- Assets for the AR experience -->
       <a-assets>
-        <!-- Video ID corrected to match reference pattern -->
+        <!-- Overlay video that will be displayed on the tracked target -->
+        <!-- Note: Replace ./assets/overlay.mp4 with your actual overlay video -->
         <video
           id="overlay-video"
           src="./assets/overlay.mp4"
-          preload="auto"
-          crossorigin="anonymous"
           playsinline
           webkit-playsinline
-          loop="true"
+          preload="auto"
+          crossorigin="anonymous"
+          muted
         ></video>
       </a-assets>
 
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <!-- Camera entity with MindAR -->
+      <a-camera look-controls="enabled: false"></a-camera>
 
-      <!-- Target entity ID corrected to match reference pattern -->
-      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
+      <!-- Image target entity with smooth-follow component -->
+      <!--
+            MindAR Configuration Notes:
+            - filterMinCF: Minimum cutoff frequency for One-Euro filter (lower = more smoothing but more lag)
+            - filterBeta: Speed coefficient for adaptive cutoff (higher = more responsive to fast motion)
+            - warmupTolerance: Frames to wait before considering target found (higher = more stable detection)
+            - missTolerance: Frames to wait before considering target lost (higher = more stable tracking)
+
+            Tuning Guidelines:
+            1. Start with filterMinCF around 0.02 and filterBeta around 60
+            2. Lower filterMinCF to reduce jitter at slow motions, but watch for added lag
+            3. Increase filterBeta to improve responsiveness during fast motion
+            4. Adjust warmupTolerance/missTolerance based on target stability requirements
+        -->
+      <a-entity mindar-image-target="targetIndex: 0">
+        <!-- Video plane that follows the tracked marker with smoothing -->
+        <!--
+                Smooth-Follow Component Notes:
+                - anchor: The marker entity to follow
+                - overscan: Scale multiplier to hide edge wobble (1.02-1.03 recommended)
+                - alphaMin: Minimum lerp factor for slow motions (lower = more smoothing)
+                - alphaMax: Maximum lerp factor for fast motions (higher = more responsive)
+
+                The component implements double smoothing:
+                1. MindAR's built-in One-Euro filter on marker pose
+                2. Content-side One-Euro filter on the placed media node
+            -->
         <a-video
           id="video-plane"
           src="#overlay-video"
           width="1"
           height="0.5625"
-          position="0 0 0"
-          rotation="0 0 0"
-          smooth-follow="anchor: #video-target; overscan: 1.02; alphaMin: 0.12; alphaMax: 0.22;"
-        ></a-video>
+          <!--
+          16:9
+          aspect
+          ratio
+          --
+        >
+          position="0 0 0" smooth-follow="anchor: #marker; overscan: 1.02;
+          alphaMin: 0.12; alphaMax: 0.22">
+        </a-video>
       </a-entity>
     </a-scene>
 
-    <!-- Consolidated JavaScript Block -->
+    <!-- Initialize the UI system when DOM is ready -->
     <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        // --- Element Selectors ---
-        const startButton = document.getElementById("start-button");
-        const startOverlay = document.getElementById("start-overlay");
-        const sceneEl = document.getElementById("ar-scene");
-        const video = document.getElementById("overlay-video");
-        const target = document.getElementById("video-target");
-        const recordButton = document.getElementById("record-button");
-        const downloadLink = document.getElementById("download-link");
-        const micCheckbox = document.getElementById("mic-checkbox");
-        const mixCanvas = document.getElementById("mix-canvas");
+      // Initialize the WebAR application
+      document.addEventListener("DOMContentLoaded", function () {
+        // Initialize the UI system (creates start overlay and controls)
+        initUI();
 
-        let mediaUnlocked = false;
-        let cameraVideoEl = null;
+        // Optional: Log version info for debugging
+        console.log("WebAR Image Tracking App initialized");
+        console.log("A-Frame version:", AFRAME.version);
+      });
 
-        // --- Core AR Logic (from reference) ---
-        startButton.addEventListener("click", async () => {
-          try {
-            await video.play();
-            video.pause();
-            video.currentTime = 0;
-            mediaUnlocked = true;
-          } catch (e) {
-            console.error("Media unlock failed:", e);
-          }
-          startOverlay.style.display = "none";
-          sceneEl.style.pointerEvents = "auto"; // Re-enable scene interaction
-        });
+      // Error handling for unsupported browsers
+      window.addEventListener("error", function (event) {
+        console.error("WebAR App Error:", event.error);
 
-        sceneEl.addEventListener("arReady", () => {
-          // Find MindAR's camera after it's ready
-          const vids = Array.from(document.querySelectorAll("video"));
-          cameraVideoEl = vids.find(
-            (v) =>
-              v.id !== "overlay-video" && v.srcObject instanceof MediaStream
+        // Show user-friendly error message
+        if (
+          event.error &&
+          event.error.message &&
+          event.error.message.includes("getUserMedia")
+        ) {
+          alert(
+            "Camera access is required for this AR experience. Please allow camera permissions and reload the page."
           );
-
-          // Attach target listeners only when AR is ready
-          target.addEventListener("targetFound", () => {
-            if (mediaUnlocked) video.play();
-          });
-          target.addEventListener("targetLost", () => {
-            video.pause();
-          });
-
-          // Show dev panel if not on mobile
-          if (!/Mobi|Android/i.test(navigator.userAgent)) {
-            document.getElementById("dev-panel").style.display = "block";
-          }
-        });
-
-        // --- Tuning Panel Logic (integrated) ---
-        const tuning = {
-          filterMinCF: document.getElementById("filterMinCF"),
-          filterBeta: document.getElementById("filterBeta"),
-          alphaMin: document.getElementById("alphaMin"),
-          alphaMax: document.getElementById("alphaMax"),
-          overscan: document.getElementById("overscan"),
-          smootherToggle: document.getElementById("smoother-toggle"),
-        };
-        const resetTuningBtn = document.getElementById("reset-tuning");
-        const TUNING_STORAGE_KEY = "webar-tuning-settings";
-
-        function broadcastTuningUpdate(settings) {
-          const event = new CustomEvent("tuning-updated", {
-            detail: {
-              filterMinCF: parseFloat(settings.filterMinCF),
-              filterBeta: parseFloat(settings.filterBeta),
-              alphaMin: parseFloat(settings.alphaMin),
-              alphaMax: parseFloat(settings.alphaMax),
-              overscan: parseFloat(settings.overscan),
-              smootherEnabled: settings.smootherEnabled,
-            },
-          });
-          document.dispatchEvent(event);
         }
-
-        function persistTuning() {
-          const settings = {
-            filterMinCF: tuning.filterMinCF.value,
-            filterBeta: tuning.filterBeta.value,
-            alphaMin: tuning.alphaMin.value,
-            alphaMax: tuning.alphaMax.value,
-            overscan: tuning.overscan.value,
-            smootherEnabled: tuning.smootherToggle.checked,
-          };
-          localStorage.setItem(TUNING_STORAGE_KEY, JSON.stringify(settings));
-          broadcastTuningUpdate(settings);
-        }
-
-        function getDefaultTuning() {
-          return {
-            filterMinCF: 0.02,
-            filterBeta: 60,
-            alphaMin: 0.12,
-            alphaMax: 0.22,
-            overscan: 1.02,
-            smootherEnabled: true,
-          };
-        }
-
-        function loadTuning() {
-          const settings =
-            JSON.parse(localStorage.getItem(TUNING_STORAGE_KEY)) ||
-            getDefaultTuning();
-          tuning.filterMinCF.value = settings.filterMinCF;
-          tuning.filterBeta.value = settings.filterBeta;
-          tuning.alphaMin.value = settings.alphaMin;
-          tuning.alphaMax.value = settings.alphaMax;
-          tuning.overscan.value = settings.overscan;
-          tuning.smootherToggle.checked = settings.smootherEnabled;
-          broadcastTuningUpdate(settings);
-        }
-
-        function resetTuning() {
-          const defaultSettings = getDefaultTuning();
-          tuning.filterMinCF.value = defaultSettings.filterMinCF;
-          tuning.filterBeta.value = defaultSettings.filterBeta;
-          tuning.alphaMin.value = defaultSettings.alphaMin;
-          tuning.alphaMax.value = defaultSettings.alphaMax;
-          tuning.overscan.value = defaultSettings.overscan;
-          tuning.smootherToggle.checked = defaultSettings.smootherEnabled;
-          localStorage.removeItem(TUNING_STORAGE_KEY);
-          broadcastTuningUpdate(defaultSettings);
-        }
-
-        Object.values(tuning).forEach((input) =>
-          input.addEventListener("change", persistTuning)
-        );
-        resetTuningBtn.addEventListener("click", resetTuning);
-        loadTuning();
-
-        // --- Recorder Logic (integrated) ---
-        // Placeholder for recorder logic to be added if needed
       });
     </script>
+
+    <!--
+        WebAR Image Tracking App
+
+        Features:
+        - Image target tracking with MindAR
+        - Double smoothing (MindAR built-in + content-side One-Euro filter)
+        - Composite recording (camera + AR overlays)
+        - iOS-compatible tap-to-start overlay
+        - Development tuning panel (localhost only)
+
+        Requirements:
+        - Modern browser with WebRTC support
+        - Camera permissions
+        - HTTPS (for production) or localhost (for development)
+
+        Target Image Guidelines:
+        - Use flat, matte, high-detail images
+        - Avoid symmetry and repeating patterns
+        - Ensure good contrast and even lighting
+        - Fill a significant portion of camera FOV
+
+        Performance Notes:
+        - Scenes are kept lightweight for smooth performance
+        - Pre-allocated vectors/quaternions to avoid garbage collection
+        - Adaptive smoothing reduces jitter while maintaining responsiveness
+
+        Platform Notes:
+        - iOS Safari: Works with MindAR's custom pipeline (no WebXR API exposure)
+        - Android Chrome: Full WebXR support available
+        - Desktop: Limited camera support (requires compatible webcam)
+    -->
   </body>
 </html>
