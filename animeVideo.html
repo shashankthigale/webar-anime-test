@@ -13,6 +13,169 @@
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
+    <!-- Professional-Grade AR Smoothing (8th Wall-style approach) -->
+    <script>
+      // Multi-frame pose buffer for averaging (reduces single-frame jitter)
+      class PoseBuffer {
+        constructor(size = 5) {
+          this.size = size;
+          this.positions = [];
+          this.quaternions = [];
+        }
+
+        add(pos, quat) {
+          this.positions.push(pos.clone());
+          this.quaternions.push(quat.clone());
+
+          if (this.positions.length > this.size) {
+            this.positions.shift();
+            this.quaternions.shift();
+          }
+        }
+
+        getAveraged() {
+          if (this.positions.length === 0) return null;
+
+          // Average positions
+          const avgPos = new THREE.Vector3();
+          this.positions.forEach((p) => avgPos.add(p));
+          avgPos.divideScalar(this.positions.length);
+
+          // Average quaternions (using simple average - works for small rotations)
+          const avgQuat = this.quaternions[0].clone();
+          for (let i = 1; i < this.quaternions.length; i++) {
+            avgQuat.slerp(this.quaternions[i], 1 / (i + 1));
+          }
+
+          return { position: avgPos, quaternion: avgQuat };
+        }
+
+        clear() {
+          this.positions = [];
+          this.quaternions = [];
+        }
+      }
+
+      // Double Exponential Smoothing (like 8th Wall uses)
+      class DoubleExpSmooth {
+        constructor(alpha = 0.3, beta = 0.3) {
+          this.alpha = alpha; // Data smoothing factor
+          this.beta = beta; // Trend smoothing factor
+          this.level = null;
+          this.trend = null;
+        }
+
+        update(value) {
+          if (this.level === null) {
+            this.level = value.clone();
+            this.trend = new THREE.Vector3(0, 0, 0);
+            return this.level.clone();
+          }
+
+          const prevLevel = this.level.clone();
+
+          // Update level
+          this.level.lerp(value, this.alpha);
+
+          // Update trend
+          const newTrend = this.level.clone().sub(prevLevel);
+          this.trend.lerp(newTrend, this.beta);
+
+          // Forecast
+          return this.level.clone().add(this.trend);
+        }
+
+        reset() {
+          this.level = null;
+          this.trend = null;
+        }
+      }
+
+      // Professional AR Smoothing Component
+      AFRAME.registerComponent("pro-smooth", {
+        schema: {
+          posAlpha: { type: "number", default: 0.25 },
+          rotAlpha: { type: "number", default: 0.25 },
+          bufferSize: { type: "number", default: 3 },
+          velocityThreshold: { type: "number", default: 0.5 },
+        },
+
+        init: function () {
+          this.poseBuffer = new PoseBuffer(this.data.bufferSize);
+          this.posSmooth = new DoubleExpSmooth(
+            this.data.posAlpha,
+            this.data.posAlpha * 0.8
+          );
+
+          this.smoothPos = new THREE.Vector3();
+          this.smoothQuat = new THREE.Quaternion();
+
+          this.prevPos = new THREE.Vector3();
+          this.velocity = new THREE.Vector3();
+
+          this.firstUpdate = true;
+          this.frameCount = 0;
+
+          // Detect when target found/lost
+          this.el.addEventListener("targetFound", () => {
+            this.poseBuffer.clear();
+            this.posSmooth.reset();
+            this.firstUpdate = true;
+            this.frameCount = 0;
+          });
+        },
+
+        tick: function (time, deltaTime) {
+          const obj3D = this.el.object3D;
+          const dt = Math.max(0.001, deltaTime / 1000);
+
+          // Get current raw pose from MindAR
+          const rawPos = obj3D.position.clone();
+          const rawQuat = obj3D.quaternion.clone();
+
+          // Calculate velocity
+          this.velocity.copy(rawPos).sub(this.prevPos).divideScalar(dt);
+          const speed = this.velocity.length();
+
+          // Add to buffer for averaging
+          this.poseBuffer.add(rawPos, rawQuat);
+
+          // Get averaged pose
+          const averaged = this.poseBuffer.getAveraged();
+          if (!averaged) return;
+
+          if (this.firstUpdate || this.frameCount < 3) {
+            // Snap immediately on first frames
+            this.smoothPos.copy(averaged.position);
+            this.smoothQuat.copy(averaged.quaternion);
+            this.firstUpdate = false;
+            this.frameCount++;
+          } else {
+            // Apply double exponential smoothing to position
+            const predicted = this.posSmooth.update(averaged.position);
+
+            // Adaptive alpha based on velocity (faster movement = less smoothing)
+            const adaptiveAlpha = Math.min(
+              this.data.posAlpha + speed * 0.1,
+              0.6 // Cap at 0.6 for responsiveness
+            );
+
+            this.smoothPos.lerp(predicted, adaptiveAlpha);
+
+            // Smooth quaternion with velocity-aware alpha
+            const rotAlpha = Math.min(this.data.rotAlpha + speed * 0.08, 0.5);
+            this.smoothQuat.slerp(averaged.quaternion, rotAlpha);
+          }
+
+          // Apply smoothed transforms
+          obj3D.position.copy(this.smoothPos);
+          obj3D.quaternion.copy(this.smoothQuat);
+
+          this.prevPos.copy(rawPos);
+        },
+      });
+    </script>
+
     <style>
       * {
         box-sizing: border-box;
@@ -477,12 +640,12 @@
     <canvas id="mix-canvas"></canvas>
 
     <!-- A-Frame Scene 
-         Optimized MindAR One-Euro Filter Settings:
-         - filterMinCF: 0.02 (reduces slow-speed jitter)
-         - filterBeta: 60 (maintains responsiveness during movement)
+         Professional AR Settings (8th Wall-inspired):
+         - MindAR filter tuned for base stability
+         - Pro-smooth component adds multi-frame averaging + prediction
     -->
     <a-scene
-      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.02; filterBeta:60; warmupTolerance:3; missTolerance:3"
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.001; filterBeta:1000; warmupTolerance:5; missTolerance:5"
       embedded
       color-space="sRGB"
       renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp, logarithmicDepthBuffer: true"
@@ -504,12 +667,16 @@
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <a-entity mindar-image-target="targetIndex: 0" id="video-target">
+      <a-entity
+        mindar-image-target="targetIndex: 0"
+        id="video-target"
+        pro-smooth="posAlpha: 0.3; rotAlpha: 0.3; bufferSize: 3"
+      >
         <a-video
           id="video-plane"
           src="#ad-video"
-          width="1"
-          height="1.5"
+          width="1.02"
+          height="1.53"
           position="0 0 0"
           rotation="0 0 0"
           material="shader: flat"
