@@ -13,146 +13,6 @@
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
-    <!-- Advanced Smoothing: One-Euro Filter + Follower Group Pattern -->
-    <script>
-      /* === One-Euro Filter (compact implementation) ============================
-   Tuning per Casiez: set beta=0, pick mincutoff to remove slow jitter;
-   then raise beta to get responsiveness at faster motion. */
-      class LP {
-        constructor(a) {
-          this.a = a;
-          this.y = 0;
-          this.init = false;
-        }
-        f(s, a) {
-          this.a = a;
-          this.y = this.init
-            ? a * s + (1 - a) * this.y
-            : ((this.init = true), s);
-          return this.y;
-        }
-      }
-
-      class OneEuro {
-        constructor(freq = 60, mincut = 1, beta = 0, dcut = 1) {
-          this.freq = freq;
-          this.minc = mincut;
-          this.beta = beta;
-          this.dcut = dcut;
-          this.x = new LP(1);
-          this.dx = new LP(1);
-          this.t = null;
-          this.prev = null;
-        }
-        _alpha(c, dt) {
-          const tau = 1 / (2 * Math.PI * c);
-          return 1 / (1 + tau / dt);
-        }
-        filter(x, now) {
-          const t = (now ?? performance.now()) / 1000,
-            dt = this.t ? t - this.t : 1 / this.freq;
-          this.t = t;
-          const dx = this.prev != null ? (x - this.prev) / dt : 0;
-          this.prev = x;
-          const aD = this._alpha(this.dcut, dt),
-            edx = this.dx.f(dx, aD);
-          const cutoff = this.minc + this.beta * Math.abs(edx),
-            aX = this._alpha(cutoff, dt);
-          return this.x.f(x, aX);
-        }
-      }
-
-      /* === A-Frame: smooth-follow (content-side smoothing) ====== */
-      AFRAME.registerComponent("smooth-follow", {
-        schema: {
-          anchor: { type: "selector" },
-          overscan: { type: "number", default: 1.02 },
-          alphaMin: { type: "number", default: 0.12 },
-          alphaMax: { type: "number", default: 0.22 },
-          freq: { type: "number", default: 60 },
-          mincut: { type: "number", default: 1.0 },
-          beta: { type: "number", default: 0.2 },
-        },
-        init() {
-          const THREE = window.THREE;
-          const a = this.data;
-          this.anchor = a.anchor;
-          this.anchor3D = this.anchor.object3D;
-          this.scene3D = this.el.sceneEl.object3D;
-
-          // create follower group and reparent our content under it
-          this.follower = new THREE.Group();
-          this.follower.visible = false;
-          this.scene3D.add(this.follower);
-          this.follower.add(this.el.object3D);
-
-          // tiny overscan to hide edge breathing
-          this.el.object3D.scale.multiplyScalar(a.overscan);
-
-          // reusable math
-          this.tPos = new THREE.Vector3();
-          this.tQuat = new THREE.Quaternion();
-          this.tScl = new THREE.Vector3();
-          this.sPos = new THREE.Vector3();
-          this.sQuat = new THREE.Quaternion();
-          this.sScl = new THREE.Vector3(1, 1, 1);
-          this.tmpM = new THREE.Matrix4();
-
-          // One-Euro per-axis for position
-          this.fx = new OneEuro(a.freq, a.mincut, a.beta);
-          this.fy = new OneEuro(a.freq, a.mincut, a.beta);
-          this.fz = new OneEuro(a.freq, a.mincut, a.beta);
-
-          this.snap = true;
-          this.anchor.addEventListener("targetFound", () => {
-            this.follower.visible = true;
-            this.snap = true;
-          });
-          this.anchor.addEventListener("targetLost", () => {
-            this.follower.visible = false;
-          });
-        },
-        tick(t, dtMS) {
-          if (!this.follower.visible) return;
-          const dt = Math.max(1 / 120, (dtMS || 0) / 1000);
-
-          // get anchor world transform
-          this.anchor3D.updateWorldMatrix(true, false);
-          this.tmpM
-            .copy(this.anchor3D.matrixWorld)
-            .decompose(this.tPos, this.tQuat, this.tScl);
-
-          if (this.snap) {
-            this.sPos.copy(this.tPos);
-            this.sQuat.copy(this.tQuat);
-            this.sScl.copy(this.tScl);
-            this.snap = false;
-          } else {
-            // position via One-Euro per axis
-            this.sPos.set(
-              this.fx.filter(this.tPos.x, t),
-              this.fy.filter(this.tPos.y, t),
-              this.fz.filter(this.tPos.z, t)
-            );
-
-            // derive adaptive alpha from linear speed
-            const speed = this.tPos.distanceTo(this.sPos) / dt;
-            const aMin = this.data.alphaMin,
-              aMax = this.data.alphaMax;
-            const alpha = Math.max(aMin, Math.min(aMax, aMin + 0.02 * speed));
-            THREE.Quaternion.slerp(this.sQuat, this.tQuat, this.sQuat, alpha);
-
-            this.sScl.lerp(this.tScl, 0.15);
-          }
-
-          // apply smoothed pose
-          this.follower.position.copy(this.sPos);
-          this.follower.quaternion.copy(this.sQuat);
-          this.follower.scale.copy(this.sScl);
-        },
-      });
-    </script>
-
     <style>
       * {
         box-sizing: border-box;
@@ -620,7 +480,6 @@
          Optimized MindAR One-Euro Filter Settings:
          - filterMinCF: 0.02 (reduces slow-speed jitter)
          - filterBeta: 60 (maintains responsiveness during movement)
-         - Combined with smooth-follow component for dual-layer smoothing
     -->
     <a-scene
       mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.02; filterBeta:60; warmupTolerance:3; missTolerance:3"
@@ -654,7 +513,6 @@
           position="0 0 0"
           rotation="0 0 0"
           material="shader: flat"
-          smooth-follow="anchor:#video-target; overscan:1.02; alphaMin:0.12; alphaMax:0.22; mincut:1.0; beta:0.2"
         ></a-video>
       </a-entity>
     </a-scene>
