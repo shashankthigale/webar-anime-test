@@ -13,6 +13,50 @@
     <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
+    <!-- Smoothing Component for Stable Tracking -->
+    <script>
+      AFRAME.registerComponent("smooth-transform", {
+        schema: {
+          speed: { type: "number", default: 0.2 },
+        },
+        init: function () {
+          this.targetPosition = new THREE.Vector3();
+          this.targetQuaternion = new THREE.Quaternion();
+          this.targetScale = new THREE.Vector3(1, 1, 1);
+          this.smoothPosition = new THREE.Vector3();
+          this.smoothQuaternion = new THREE.Quaternion();
+          this.smoothScale = new THREE.Vector3(1, 1, 1);
+          this.firstUpdate = true;
+        },
+        tick: function () {
+          const obj3D = this.el.object3D;
+
+          // Store target transforms
+          this.targetPosition.copy(obj3D.position);
+          this.targetQuaternion.copy(obj3D.quaternion);
+          this.targetScale.copy(obj3D.scale);
+
+          // Initialize on first frame
+          if (this.firstUpdate) {
+            this.smoothPosition.copy(this.targetPosition);
+            this.smoothQuaternion.copy(this.targetQuaternion);
+            this.smoothScale.copy(this.targetScale);
+            this.firstUpdate = false;
+          }
+
+          // Smooth interpolation
+          this.smoothPosition.lerp(this.targetPosition, this.data.speed);
+          this.smoothQuaternion.slerp(this.targetQuaternion, this.data.speed);
+          this.smoothScale.lerp(this.targetScale, this.data.speed);
+
+          // Apply smoothed transforms
+          obj3D.position.copy(this.smoothPosition);
+          obj3D.quaternion.copy(this.smoothQuaternion);
+          obj3D.scale.copy(this.smoothScale);
+        },
+      });
+    </script>
+
     <style>
       * {
         box-sizing: border-box;
@@ -476,12 +520,17 @@
     <!-- Hidden mixer canvas (we record this) -->
     <canvas id="mix-canvas"></canvas>
 
-    <!-- A-Frame Scene -->
+    <!-- A-Frame Scene 
+         Tracking Stability Settings:
+         - filterMinCF: 0.0001 (lower = more smoothing, less jitter)
+         - filterBeta: 0.001 (lower = more smoothing)
+         - Combined with smooth-transform component for double smoothing
+    -->
     <a-scene
-      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.001; filterBeta:5; warmupTolerance:2; missTolerance:2"
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.0001; filterBeta:0.001; warmupTolerance:5; missTolerance:5"
       embedded
       color-space="sRGB"
-      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp"
+      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp, logarithmicDepthBuffer: true"
       vr-mode-ui="enabled: false"
       device-orientation-permission-ui="enabled: true"
       id="ar-scene"
@@ -501,15 +550,17 @@
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
       <a-entity mindar-image-target="targetIndex: 0" id="video-target">
-        <a-video
-          id="video-plane"
-          src="#ad-video"
-          width="1"
-          height="1.5"
-          position="0 0 0"
-          rotation="0 0 0"
-          material="shader: flat"
-        ></a-video>
+        <a-entity id="smooth-container" smooth-transform="speed: 0.15">
+          <a-video
+            id="video-plane"
+            src="#ad-video"
+            width="1"
+            height="1.5"
+            position="0 0 0"
+            rotation="0 0 0"
+            material="shader: flat"
+          ></a-video>
+        </a-entity>
       </a-entity>
     </a-scene>
 
