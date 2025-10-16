@@ -91,12 +91,12 @@
         }
       }
 
-      // Professional AR Smoothing Component
+      // Professional AR Smoothing Component (8th Wall-inspired)
       AFRAME.registerComponent("pro-smooth", {
         schema: {
-          posAlpha: { type: "number", default: 0.25 },
-          rotAlpha: { type: "number", default: 0.25 },
-          bufferSize: { type: "number", default: 3 },
+          posAlpha: { type: "number", default: 0.35 },
+          rotAlpha: { type: "number", default: 0.35 },
+          bufferSize: { type: "number", default: 4 },
           velocityThreshold: { type: "number", default: 0.5 },
         },
 
@@ -104,7 +104,7 @@
           this.poseBuffer = new PoseBuffer(this.data.bufferSize);
           this.posSmooth = new DoubleExpSmooth(
             this.data.posAlpha,
-            this.data.posAlpha * 0.8
+            this.data.posAlpha * 0.7
           );
 
           this.smoothPos = new THREE.Vector3();
@@ -112,9 +112,12 @@
 
           this.prevPos = new THREE.Vector3();
           this.velocity = new THREE.Vector3();
+          this.acceleration = new THREE.Vector3();
+          this.prevVelocity = new THREE.Vector3();
 
           this.firstUpdate = true;
           this.frameCount = 0;
+          this.targetVisible = false;
 
           // Detect when target found/lost
           this.el.addEventListener("targetFound", () => {
@@ -122,10 +125,17 @@
             this.posSmooth.reset();
             this.firstUpdate = true;
             this.frameCount = 0;
+            this.targetVisible = true;
+          });
+
+          this.el.addEventListener("targetLost", () => {
+            this.targetVisible = false;
           });
         },
 
         tick: function (time, deltaTime) {
+          if (!this.targetVisible) return;
+
           const obj3D = this.el.object3D;
           const dt = Math.max(0.001, deltaTime / 1000);
 
@@ -133,9 +143,14 @@
           const rawPos = obj3D.position.clone();
           const rawQuat = obj3D.quaternion.clone();
 
-          // Calculate velocity
+          // Calculate velocity and acceleration (like 8th Wall does)
           this.velocity.copy(rawPos).sub(this.prevPos).divideScalar(dt);
+          this.acceleration
+            .copy(this.velocity)
+            .sub(this.prevVelocity)
+            .divideScalar(dt);
           const speed = this.velocity.length();
+          const accel = this.acceleration.length();
 
           // Add to buffer for averaging
           this.poseBuffer.add(rawPos, rawQuat);
@@ -144,8 +159,8 @@
           const averaged = this.poseBuffer.getAveraged();
           if (!averaged) return;
 
-          if (this.firstUpdate || this.frameCount < 3) {
-            // Snap immediately on first frames
+          if (this.firstUpdate || this.frameCount < 5) {
+            // Snap immediately on first frames (8th Wall style)
             this.smoothPos.copy(averaged.position);
             this.smoothQuat.copy(averaged.quaternion);
             this.firstUpdate = false;
@@ -154,16 +169,22 @@
             // Apply double exponential smoothing to position
             const predicted = this.posSmooth.update(averaged.position);
 
-            // Adaptive alpha based on velocity (faster movement = less smoothing)
+            // Adaptive alpha based on velocity AND acceleration
+            // High acceleration = more responsive (like during quick movements)
+            const velocityFactor = Math.min(speed * 0.15, 0.3);
+            const accelFactor = Math.min(accel * 0.05, 0.2);
             const adaptiveAlpha = Math.min(
-              this.data.posAlpha + speed * 0.1,
-              0.6 // Cap at 0.6 for responsiveness
+              this.data.posAlpha + velocityFactor + accelFactor,
+              0.7 // Higher cap for better responsiveness
             );
 
             this.smoothPos.lerp(predicted, adaptiveAlpha);
 
-            // Smooth quaternion with velocity-aware alpha
-            const rotAlpha = Math.min(this.data.rotAlpha + speed * 0.08, 0.5);
+            // Smooth quaternion with similar adaptive approach
+            const rotAlpha = Math.min(
+              this.data.rotAlpha + speed * 0.12 + accel * 0.04,
+              0.6
+            );
             this.smoothQuat.slerp(averaged.quaternion, rotAlpha);
           }
 
@@ -172,6 +193,68 @@
           obj3D.quaternion.copy(this.smoothQuat);
 
           this.prevPos.copy(rawPos);
+          this.prevVelocity.copy(this.velocity);
+        },
+      });
+
+      // 8th Wall-style Video Fade Component
+      AFRAME.registerComponent("target-video-fade", {
+        schema: {
+          video: { type: "selector" },
+          fadeDuration: { type: "number", default: 800 },
+        },
+
+        init: function () {
+          this.video = this.data.video;
+          this.material = null;
+          this.fading = false;
+          this.targetOpacity = 0;
+          this.currentOpacity = 0;
+
+          // Get video plane material
+          setTimeout(() => {
+            const videoPlane = this.el.querySelector("a-video");
+            if (videoPlane) {
+              this.material = videoPlane.getObject3D("mesh").material;
+              this.material.transparent = true;
+              this.material.opacity = 0;
+            }
+          }, 100);
+
+          this.el.addEventListener("targetFound", () => {
+            if (this.video && this.video.paused) {
+              this.video.play();
+            }
+            this.targetOpacity = 1;
+            this.fading = true;
+          });
+
+          this.el.addEventListener("targetLost", () => {
+            this.targetOpacity = 0;
+            this.fading = true;
+            if (this.video) {
+              this.video.pause();
+            }
+          });
+        },
+
+        tick: function (time, deltaTime) {
+          if (!this.material || !this.fading) return;
+
+          const step = deltaTime / this.data.fadeDuration;
+
+          if (this.targetOpacity > this.currentOpacity) {
+            this.currentOpacity = Math.min(this.currentOpacity + step, 1);
+          } else {
+            this.currentOpacity = Math.max(this.currentOpacity - step, 0);
+          }
+
+          this.material.opacity = this.currentOpacity;
+
+          if (Math.abs(this.currentOpacity - this.targetOpacity) < 0.01) {
+            this.currentOpacity = this.targetOpacity;
+            this.fading = false;
+          }
         },
       });
     </script>
@@ -645,7 +728,7 @@
          - Pro-smooth component adds multi-frame averaging + prediction
     -->
     <a-scene
-      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.001; filterBeta:1000; warmupTolerance:5; missTolerance:5"
+      mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.0005; filterBeta:2000; warmupTolerance:4; missTolerance:4"
       embedded
       color-space="sRGB"
       renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp, logarithmicDepthBuffer: true"
@@ -670,7 +753,8 @@
       <a-entity
         mindar-image-target="targetIndex: 0"
         id="video-target"
-        pro-smooth="posAlpha: 0.3; rotAlpha: 0.3; bufferSize: 3"
+        pro-smooth="posAlpha: 0.35; rotAlpha: 0.35; bufferSize: 4"
+        target-video-fade="video: #ad-video; fadeDuration: 600"
       >
         <a-video
           id="video-plane"
