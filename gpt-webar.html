@@ -3,10 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>AR Experience — Image Tracking + Recording</title>
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
     <!-- A-Frame + extras + MindAR -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -22,656 +19,160 @@
           this.positions = [];
           this.quaternions = [];
         }
-
         add(pos, quat) {
           this.positions.push(pos.clone());
           this.quaternions.push(quat.clone());
-
           if (this.positions.length > this.size) {
             this.positions.shift();
             this.quaternions.shift();
           }
         }
-
         getAveraged() {
           if (this.positions.length === 0) return null;
-
-          // Average positions
           const avgPos = new THREE.Vector3();
           this.positions.forEach((p) => avgPos.add(p));
           avgPos.divideScalar(this.positions.length);
-
-          // Average quaternions (using simple average - works for small rotations)
           const avgQuat = this.quaternions[0].clone();
           for (let i = 1; i < this.quaternions.length; i++) {
             avgQuat.slerp(this.quaternions[i], 1 / (i + 1));
           }
-
           return { position: avgPos, quaternion: avgQuat };
         }
-
-        clear() {
-          this.positions = [];
-          this.quaternions = [];
-        }
+        clear() { this.positions = []; this.quaternions = []; }
       }
 
       // Double Exponential Smoothing (like 8th Wall uses)
       class DoubleExpSmooth {
         constructor(alpha = 0.3, beta = 0.3) {
-          this.alpha = alpha; // Data smoothing factor
-          this.beta = beta; // Trend smoothing factor
-          this.level = null;
-          this.trend = null;
+          this.alpha = alpha; this.beta = beta; this.level = null; this.trend = null;
         }
-
         update(value) {
-          if (this.level === null) {
-            this.level = value.clone();
-            this.trend = new THREE.Vector3(0, 0, 0);
-            return this.level.clone();
-          }
-
+          if (this.level === null) { this.level = value.clone(); this.trend = new THREE.Vector3(); return this.level.clone(); }
           const prevLevel = this.level.clone();
-
-          // Update level
           this.level.lerp(value, this.alpha);
-
-          // Update trend
           const newTrend = this.level.clone().sub(prevLevel);
           this.trend.lerp(newTrend, this.beta);
-
-          // Forecast
           return this.level.clone().add(this.trend);
         }
-
-        reset() {
-          this.level = null;
-          this.trend = null;
-        }
+        reset() { this.level = null; this.trend = null; }
       }
 
       // Professional AR Smoothing Component (8th Wall-inspired)
       AFRAME.registerComponent("pro-smooth", {
-        schema: {
-          posAlpha: { type: "number", default: 0.35 },
-          rotAlpha: { type: "number", default: 0.35 },
-          bufferSize: { type: "number", default: 4 },
-          velocityThreshold: { type: "number", default: 0.5 },
-        },
-
+        schema: { posAlpha: {type: "number", default: 0.35}, rotAlpha: {type: "number", default: 0.35}, bufferSize: {type: "number", default: 4}, velocityThreshold: {type: "number", default: 0.5} },
         init: function () {
           this.poseBuffer = new PoseBuffer(this.data.bufferSize);
-          this.posSmooth = new DoubleExpSmooth(
-            this.data.posAlpha,
-            this.data.posAlpha * 0.7
-          );
-
-          this.smoothPos = new THREE.Vector3();
-          this.smoothQuat = new THREE.Quaternion();
-
-          this.prevPos = new THREE.Vector3();
-          this.velocity = new THREE.Vector3();
-          this.acceleration = new THREE.Vector3();
-          this.prevVelocity = new THREE.Vector3();
-
-          this.firstUpdate = true;
-          this.frameCount = 0;
-          this.targetVisible = false;
-
-          // Detect when target found/lost
-          this.el.addEventListener("targetFound", () => {
-            this.poseBuffer.clear();
-            this.posSmooth.reset();
-            this.firstUpdate = true;
-            this.frameCount = 0;
-            this.targetVisible = true;
-          });
-
-          this.el.addEventListener("targetLost", () => {
-            this.targetVisible = false;
-          });
+          this.posSmooth = new DoubleExpSmooth(this.data.posAlpha, this.data.posAlpha * 0.7);
+          this.smoothPos = new THREE.Vector3(); this.smoothQuat = new THREE.Quaternion();
+          this.prevPos = new THREE.Vector3(); this.velocity = new THREE.Vector3(); this.acceleration = new THREE.Vector3(); this.prevVelocity = new THREE.Vector3();
+          this.firstUpdate = true; this.frameCount = 0; this.targetVisible = false;
+          this.el.addEventListener("targetFound", () => { this.poseBuffer.clear(); this.posSmooth.reset(); this.firstUpdate = true; this.frameCount = 0; this.targetVisible = true; });
+          this.el.addEventListener("targetLost",  () => { this.targetVisible = false; });
         },
-
         tick: function (time, deltaTime) {
           if (!this.targetVisible) return;
-
-          const obj3D = this.el.object3D;
-          const dt = Math.max(0.001, deltaTime / 1000);
-
-          // Get current raw pose from MindAR
-          const rawPos = obj3D.position.clone();
-          const rawQuat = obj3D.quaternion.clone();
-
-          // Calculate velocity and acceleration (like 8th Wall does)
+          const obj3D = this.el.object3D; const dt = Math.max(0.001, deltaTime / 1000);
+          const rawPos = obj3D.position.clone(); const rawQuat = obj3D.quaternion.clone();
           this.velocity.copy(rawPos).sub(this.prevPos).divideScalar(dt);
-          this.acceleration
-            .copy(this.velocity)
-            .sub(this.prevVelocity)
-            .divideScalar(dt);
-          const speed = this.velocity.length();
-          const accel = this.acceleration.length();
-
-          // Add to buffer for averaging
+          this.acceleration.copy(this.velocity).sub(this.prevVelocity).divideScalar(dt);
+          const speed = this.velocity.length(); const accel = this.acceleration.length();
           this.poseBuffer.add(rawPos, rawQuat);
-
-          // Get averaged pose
-          const averaged = this.poseBuffer.getAveraged();
-          if (!averaged) return;
-
+          const averaged = this.poseBuffer.getAveraged(); if (!averaged) return;
           if (this.firstUpdate || this.frameCount < 5) {
-            // Snap immediately on first frames (8th Wall style)
-            this.smoothPos.copy(averaged.position);
-            this.smoothQuat.copy(averaged.quaternion);
-            this.firstUpdate = false;
-            this.frameCount++;
+            this.smoothPos.copy(averaged.position); this.smoothQuat.copy(averaged.quaternion);
+            this.firstUpdate = false; this.frameCount++;
           } else {
-            // Apply double exponential smoothing to position
             const predicted = this.posSmooth.update(averaged.position);
-
-            // Adaptive alpha based on velocity AND acceleration
-            // High acceleration = more responsive (like during quick movements)
             const velocityFactor = Math.min(speed * 0.15, 0.3);
             const accelFactor = Math.min(accel * 0.05, 0.2);
-            const adaptiveAlpha = Math.min(
-              this.data.posAlpha + velocityFactor + accelFactor,
-              0.7 // Higher cap for better responsiveness
-            );
-
+            const adaptiveAlpha = Math.min(this.data.posAlpha + velocityFactor + accelFactor, 0.7);
             this.smoothPos.lerp(predicted, adaptiveAlpha);
-
-            // Smooth quaternion with similar adaptive approach
-            const rotAlpha = Math.min(
-              this.data.rotAlpha + speed * 0.12 + accel * 0.04,
-              0.6
-            );
+            const rotAlpha = Math.min(this.data.rotAlpha + speed * 0.12 + accel * 0.04, 0.6);
             this.smoothQuat.slerp(averaged.quaternion, rotAlpha);
           }
-
-          // Apply smoothed transforms
-          obj3D.position.copy(this.smoothPos);
-          obj3D.quaternion.copy(this.smoothQuat);
-
-          this.prevPos.copy(rawPos);
-          this.prevVelocity.copy(this.velocity);
+          obj3D.position.copy(this.smoothPos); obj3D.quaternion.copy(this.smoothQuat);
+          this.prevPos.copy(rawPos); this.prevVelocity.copy(this.velocity);
         },
       });
 
-      // 8th Wall-style Video Fade Component
+      // Video fade & per-target play/pause
       AFRAME.registerComponent("target-video-fade", {
-        schema: {
-          video: { type: "selector" },
-          fadeDuration: { type: "number", default: 800 },
-        },
-
+        schema: { video: { type: "selector" }, fadeDuration: { type: "number", default: 800 } },
         init: function () {
-          this.video = this.data.video;
-          this.material = null;
-          this.fading = false;
-          this.targetOpacity = 0;
-          this.currentOpacity = 0;
-
-          // Get video plane material
+          this.video = this.data.video; this.material = null; this.fading = false; this.targetOpacity = 0; this.currentOpacity = 0;
           setTimeout(() => {
             const videoPlane = this.el.querySelector("a-video");
             if (videoPlane) {
               this.material = videoPlane.getObject3D("mesh").material;
-              this.material.transparent = true;
-              this.material.opacity = 0;
+              this.material.transparent = true; this.material.opacity = 0;
             }
           }, 100);
-
           this.el.addEventListener("targetFound", () => {
-            if (this.video && this.video.paused) {
-              this.video.play();
-            }
-            this.targetOpacity = 1;
-            this.fading = true;
+            if (this.video && this.video.paused) { this.video.play().catch(()=>{}); }
+            this.targetOpacity = 1; this.fading = true;
           });
-
           this.el.addEventListener("targetLost", () => {
-            this.targetOpacity = 0;
-            this.fading = true;
-            if (this.video) {
-              this.video.pause();
-            }
+            this.targetOpacity = 0; this.fading = true;
+            if (this.video) { this.video.pause(); }
           });
         },
-
         tick: function (time, deltaTime) {
           if (!this.material || !this.fading) return;
-
           const step = deltaTime / this.data.fadeDuration;
-
-          if (this.targetOpacity > this.currentOpacity) {
-            this.currentOpacity = Math.min(this.currentOpacity + step, 1);
-          } else {
-            this.currentOpacity = Math.max(this.currentOpacity - step, 0);
-          }
-
+          if (this.targetOpacity > this.currentOpacity) this.currentOpacity = Math.min(this.currentOpacity + step, 1);
+          else this.currentOpacity = Math.max(this.currentOpacity - step, 0);
           this.material.opacity = this.currentOpacity;
-
-          if (Math.abs(this.currentOpacity - this.targetOpacity) < 0.01) {
-            this.currentOpacity = this.targetOpacity;
-            this.fading = false;
-          }
+          if (Math.abs(this.currentOpacity - this.targetOpacity) < 0.01) { this.currentOpacity = this.targetOpacity; this.fading = false; }
         },
       });
     </script>
 
     <style>
-      * {
-        box-sizing: border-box;
-      }
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        position: fixed;
-        overscroll-behavior: none;
-        -webkit-overflow-scrolling: touch;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Oxygen, Ubuntu, sans-serif;
-      }
-
-      /* Start Overlay */
-      #start-overlay {
-        position: fixed;
-        inset: 0;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #fff;
-        z-index: 999;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        transition: opacity 0.3s ease;
-      }
-      #start-overlay.fade-out {
-        opacity: 0;
-        pointer-events: none;
-      }
-      #start-overlay h1 {
-        font-size: 28px;
-        margin-bottom: 12px;
-        text-align: center;
-        padding: 0 20px;
-      }
-      #start-overlay p {
-        font-size: 16px;
-        opacity: 0.9;
-        text-align: center;
-        max-width: 400px;
-        padding: 0 20px;
-        margin-bottom: 24px;
-      }
-      #start-button {
-        padding: 16px 48px;
-        font-size: 18px;
-        font-weight: 600;
-        background: #fff;
-        color: #667eea;
-        border: 0;
-        border-radius: 50px;
-        cursor: pointer;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-        transition: transform 0.2s, box-shadow 0.2s;
-      }
-      #start-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-      }
-      #start-button:active {
-        transform: translateY(0);
-      }
-
-      /* Loading Indicator */
-      #loading-indicator {
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.75);
-        color: #fff;
-        padding: 12px 24px;
-        border-radius: 25px;
-        z-index: 998;
-        display: none;
-        align-items: center;
-        gap: 12px;
-        backdrop-filter: blur(10px);
-      }
-      #loading-indicator.show {
-        display: flex;
-      }
-      .spinner {
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #fff;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      /* Tracking Status */
-      #tracking-status {
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.75);
-        color: #fff;
-        padding: 12px 24px;
-        border-radius: 25px;
-        z-index: 997;
-        display: none;
-        align-items: center;
-        gap: 10px;
-        backdrop-filter: blur(10px);
-        transition: all 0.3s ease;
-      }
-      #tracking-status.show {
-        display: flex;
-      }
-      #tracking-status.tracking {
-        background: rgba(16, 185, 129, 0.9);
-      }
-      #tracking-status.searching {
-        background: rgba(245, 158, 11, 0.9);
-      }
-      .status-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #fff;
-      }
-      .status-dot.pulse {
-        animation: pulse 1.5s ease-in-out infinite;
-      }
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 0.5;
-          transform: scale(0.8);
-        }
-      }
-
-      /* Instructions */
-      #instructions {
-        position: fixed;
-        bottom: 100px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.75);
-        color: #fff;
-        padding: 16px 24px;
-        border-radius: 20px;
-        z-index: 996;
-        text-align: center;
-        max-width: 90%;
-        backdrop-filter: blur(10px);
-        display: none;
-        animation: slideUp 0.5s ease;
-      }
-      #instructions.show {
-        display: block;
-      }
-      @keyframes slideUp {
-        from {
-          transform: translate(-50%, 20px);
-          opacity: 0;
-        }
-        to {
-          transform: translate(-50%, 0);
-          opacity: 1;
-        }
-      }
-
-      /* Camera-Style Controls */
-      #rec-controls {
-        position: fixed !important;
-        bottom: 40px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        z-index: 9999 !important;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 20px;
-        pointer-events: auto;
-        margin: 0;
-        padding: 0;
-      }
-
-      /* Recording Duration & Status */
-      #rec-status {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        background: rgba(0, 0, 0, 0.75);
-        padding: 10px 20px;
-        border-radius: 25px;
-        backdrop-filter: blur(10px);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      }
-      #rec-status.show {
-        opacity: 1;
-      }
-
-      .rec-indicator {
-        width: 12px;
-        height: 12px;
-        background: #ef4444;
-        border-radius: 50%;
-        animation: recordingPulse 1.5s ease-in-out infinite;
-      }
-      @keyframes recordingPulse {
-        0%,
-        100% {
-          opacity: 1;
-          transform: scale(1);
-        }
-        50% {
-          opacity: 0.5;
-          transform: scale(0.8);
-        }
-      }
-
-      #rec-duration {
-        font-size: 18px;
-        font-weight: 600;
-        color: #fff;
-        min-width: 50px;
-        font-variant-numeric: tabular-nums;
-      }
-
-      /* Camera Capture Button */
-      #capture-btn {
-        width: 70px;
-        height: 70px;
-        min-width: 70px;
-        min-height: 70px;
-        max-width: 70px;
-        max-height: 70px;
-        aspect-ratio: 1;
-        border-radius: 50%;
-        background: #fff;
-        border: 5px solid rgba(255, 255, 255, 0.3);
-        cursor: pointer;
-        position: relative;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-        pointer-events: auto;
-        -webkit-tap-highlight-color: transparent;
-        flex-shrink: 0;
-      }
-      #capture-btn:hover {
-        transform: scale(1.05);
-      }
-      #capture-btn:active {
-        transform: scale(0.95);
-      }
-
-      /* Inner circle (red for record, transitions to square for stop) */
-      .capture-inner {
-        width: 56px;
-        height: 56px;
-        min-width: 56px;
-        min-height: 56px;
-        max-width: 56px;
-        max-height: 56px;
-        aspect-ratio: 1;
-        background: #ef4444;
-        border-radius: 50%;
-        transition: all 0.3s ease;
-        flex-shrink: 0;
-      }
-      #capture-btn.recording .capture-inner {
-        width: 28px;
-        height: 28px;
-        min-width: 28px;
-        min-height: 28px;
-        max-width: 28px;
-        max-height: 28px;
-        border-radius: 6px;
-      }
-
-      /* Download Button - Hidden (auto-downloads) */
-      #dl {
-        display: none;
-      }
-
-      /* Countdown Overlay */
-      #countdown-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.7);
-        z-index: 10000;
-        display: none;
-        justify-content: center;
-        align-items: center;
-        backdrop-filter: blur(5px);
-      }
-      #countdown-overlay.show {
-        display: flex;
-      }
-      #countdown-number {
-        font-size: 120px;
-        font-weight: 700;
-        color: #fff;
-        animation: countdownScale 1s ease-in-out;
-      }
-      @keyframes countdownScale {
-        0% {
-          transform: scale(0.5);
-          opacity: 0;
-        }
-        50% {
-          transform: scale(1.2);
-          opacity: 1;
-        }
-        100% {
-          transform: scale(1);
-          opacity: 1;
-        }
-      }
-
-      /* Responsive */
-      @media (max-width: 600px) {
-        #start-overlay h1 {
-          font-size: 24px;
-        }
-        #start-overlay p {
-          font-size: 14px;
-        }
-        #start-button {
-          padding: 14px 36px;
-          font-size: 16px;
-        }
-        #rec-controls {
-          bottom: 30px !important;
-        }
-        #capture-btn {
-          width: 70px;
-          height: 70px;
-          min-width: 70px;
-          min-height: 70px;
-          max-width: 70px;
-          max-height: 70px;
-        }
-        .capture-inner {
-          width: 56px;
-          height: 56px;
-          min-width: 56px;
-          min-height: 56px;
-          max-width: 56px;
-          max-height: 56px;
-        }
-        #capture-btn.recording .capture-inner {
-          width: 28px;
-          height: 28px;
-          min-width: 28px;
-          min-height: 28px;
-          max-width: 28px;
-          max-height: 28px;
-        }
-        #instructions {
-          font-size: 14px;
-          bottom: 120px;
-        }
-      }
-
-      /* Hidden mixer canvas */
-      #mix-canvas {
-        display: none;
-      }
-
-      /* A-Frame Scene - Ensure it doesn't block UI controls */
-      a-scene {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-        z-index: 1 !important;
-        overflow: hidden !important;
-      }
-
-      /* Ensure A-Frame canvas maintains aspect ratio */
-      a-scene canvas {
-        object-fit: cover !important;
-      }
-
-      /* Ensure UI overlays are above the scene */
-      #loading-indicator,
-      #tracking-status,
-      #instructions,
-      #rec-controls,
-      #countdown-overlay {
-        pointer-events: auto;
-      }
-
-      /* Prevent any scrolling */
-      body > * {
-        max-height: 100vh;
-        overflow: hidden;
-      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; position: fixed; overscroll-behavior: none; -webkit-overflow-scrolling: touch; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif; }
+      #start-overlay { position: fixed; inset: 0; background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:#fff; z-index:999; display:flex; flex-direction:column; justify-content:center; align-items:center; transition: opacity .3s ease; }
+      #start-overlay.fade-out { opacity:0; pointer-events:none; }
+      #start-overlay h1 { font-size:28px; margin-bottom:12px; text-align:center; padding:0 20px; }
+      #start-overlay p { font-size:16px; opacity:.9; text-align:center; max-width:400px; padding:0 20px; margin-bottom:24px; }
+      #start-button { padding:16px 48px; font-size:18px; font-weight:600; background:#fff; color:#667eea; border:0; border-radius:50px; cursor:pointer; box-shadow:0 4px 15px rgba(0,0,0,.2); transition: transform .2s, box-shadow .2s; }
+      #start-button:hover { transform: translateY(-2px); box-shadow:0 6px 20px rgba(0,0,0,.3); }
+      #start-button:active { transform: translateY(0); }
+      #loading-indicator { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; padding:12px 24px; border-radius:25px; z-index:998; display:none; align-items:center; gap:12px; backdrop-filter: blur(10px); }
+      #loading-indicator.show { display:flex; }
+      .spinner { width:20px; height:20px; border:3px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation: spin .8s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #tracking-status { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; padding:12px 24px; border-radius:25px; z-index:997; display:none; align-items:center; gap:10px; backdrop-filter: blur(10px); transition: all .3s ease; }
+      #tracking-status.show { display:flex; }
+      #tracking-status.tracking { background: rgba(16,185,129,.9); }
+      #tracking-status.searching { background: rgba(245,158,11,.9); }
+      .status-dot { width:10px; height:10px; border-radius:50%; background:#fff; }
+      .status-dot.pulse { animation: pulse 1.5s ease-in-out infinite; }
+      @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+      #instructions { position:fixed; bottom:100px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,.75); color:#fff; padding:16px 24px; border-radius:20px; z-index:996; text-align:center; max-width:90%; backdrop-filter: blur(10px); display:none; animation: slideUp .5s ease; }
+      #instructions.show { display:block; }
+      @keyframes slideUp { from{transform:translate(-50%,20px); opacity:0} to{transform:translate(-50%,0); opacity:1} }
+      #rec-controls { position:fixed !important; bottom:40px !important; left:50% !important; transform:translateX(-50%) !important; z-index:9999 !important; display:flex; flex-direction:column; align-items:center; gap:20px; pointer-events:auto; margin:0; padding:0; }
+      #rec-status { display:flex; align-items:center; gap:12px; background:rgba(0,0,0,.75); padding:10px 20px; border-radius:25px; backdrop-filter: blur(10px); opacity:0; transition: opacity .3s ease; }
+      #rec-status.show { opacity:1; }
+      .rec-indicator { width:12px; height:12px; background:#ef4444; border-radius:50%; animation: recordingPulse 1.5s ease-in-out infinite; }
+      @keyframes recordingPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+      #rec-duration { font-size:18px; font-weight:600; color:#fff; min-width:50px; font-variant-numeric: tabular-nums; }
+      #capture-btn { width:70px; height:70px; min-width:70px; min-height:70px; max-width:70px; max-height:70px; aspect-ratio:1; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.3); cursor:pointer; position:relative; transition: all .2s ease; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 20px rgba(0,0,0,.3); pointer-events:auto; -webkit-tap-highlight-color:transparent; flex-shrink:0; }
+      #capture-btn:hover { transform: scale(1.05); }
+      #capture-btn:active { transform: scale(.95); }
+      .capture-inner { width:56px; height:56px; min-width:56px; min-height:56px; max-width:56px; max-height:56px; aspect-ratio:1; background:#ef4444; border-radius:50%; transition: all .3s ease; flex-shrink:0; }
+      #capture-btn.recording .capture-inner { width:28px; height:28px; min-width:28px; min-height:28px; max-width:28px; max-height:28px; border-radius:6px; }
+      #dl { display:none; }
+      #countdown-overlay { position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:10000; display:none; justify-content:center; align-items:center; backdrop-filter: blur(5px); }
+      #countdown-overlay.show { display:flex; }
+      #countdown-number { font-size:120px; font-weight:700; color:#fff; animation: countdownScale 1s ease-in-out; }
+      @keyframes countdownScale { 0%{transform:scale(.5);opacity:0} 50%{transform:scale(1.2);opacity:1} 100%{transform:scale(1);opacity:1} }
+      @media (max-width: 600px) { #start-overlay h1{font-size:24px} #start-overlay p{font-size:14px} #start-button{padding:14px 36px;font-size:16px} #rec-controls{bottom:30px !important} #capture-btn{width:70px;height:70px;min-width:70px;min-height:70px;max-width:70px;max-height:70px} .capture-inner{width:56px;height:56px;min-width:56px;min-height:56px;max-width:56px;max-height:56px} #capture-btn.recording .capture-inner{width:28px;height:28px;min-width:28px;min-height:28px;max-width:28px;max-height:28px} #instructions{font-size:14px;bottom:120px} }
+      #mix-canvas { display:none; }
+      a-scene { position:fixed !important; top:0 !important; left:0 !important; width:100% !important; height:100% !important; z-index:1 !important; overflow:hidden !important; }
+      a-scene canvas { object-fit: cover !important; }
+      #loading-indicator, #tracking-status, #instructions, #rec-controls, #countdown-overlay { pointer-events: auto; }
+      body > * { max-height: 100vh; overflow: hidden; }
     </style>
   </head>
 
@@ -679,54 +180,32 @@
     <!-- Start Overlay -->
     <div id="start-overlay">
       <h1>🎯 AR Image Tracking Experience</h1>
-      <p>
-        Point your camera at the target image to see AR content come to life!
-      </p>
+      <p>Point your camera at the target image to see AR content come to life!</p>
       <button id="start-button">Start Experience</button>
     </div>
 
     <!-- Loading Indicator -->
-    <div id="loading-indicator">
-      <div class="spinner"></div>
-      <span>Initializing AR...</span>
-    </div>
+    <div id="loading-indicator"><div class="spinner"></div><span>Initializing AR...</span></div>
 
     <!-- Tracking Status -->
-    <div id="tracking-status">
-      <div class="status-dot"></div>
-      <span id="status-text">Searching for target...</span>
-    </div>
+    <div id="tracking-status"><div class="status-dot"></div><span id="status-text">Searching for target...</span></div>
 
     <!-- Instructions -->
-    <div id="instructions">
-      <strong>📱 Point your camera at the target image</strong><br />
-      Move slowly and keep the target in view
-    </div>
+    <div id="instructions"><strong>📱 Point your camera at the target image</strong><br />Move slowly and keep the target in view</div>
 
     <!-- Camera-Style Recording Controls -->
     <div id="rec-controls">
-      <div id="rec-status">
-        <div class="rec-indicator"></div>
-        <span id="rec-duration">0:00</span>
-      </div>
-      <button id="capture-btn">
-        <div class="capture-inner"></div>
-      </button>
+      <div id="rec-status"><div class="rec-indicator"></div><span id="rec-duration">0:00</span></div>
+      <button id="capture-btn"><div class="capture-inner"></div></button>
     </div>
 
     <!-- Countdown Overlay -->
-    <div id="countdown-overlay">
-      <div id="countdown-number">3</div>
-    </div>
+    <div id="countdown-overlay"><div id="countdown-number">3</div></div>
 
-    <!-- Hidden mixer canvas (we record this) -->
+    <!-- Hidden mixer canvas -->
     <canvas id="mix-canvas"></canvas>
 
-    <!-- A-Frame Scene 
-         Professional AR Settings (8th Wall-inspired):
-         - MindAR filter tuned for base stability
-         - Pro-smooth component adds multi-frame averaging + prediction
-    -->
+    <!-- A-Frame Scene -->
     <a-scene
       mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: auto; uiLoading: auto; filterMinCF:0.0005; filterBeta:2000; warmupTolerance:4; missTolerance:4"
       embedded
@@ -737,47 +216,31 @@
       id="ar-scene"
     >
       <a-assets>
-        <video
-          id="ad-video"
-          src="./overlay.mp4"
-          preload="auto"
-          crossorigin="anonymous"
-          playsinline
-          webkit-playsinline
-          loop
-        ></video>
+        <!-- One video per target image -->
+        <video id="ad-video-0" src="./overlay2.mp4" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
+        <video id="ad-video-1" src="./overlay.mp4" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
       </a-assets>
 
       <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-      <a-entity
-        mindar-image-target="targetIndex: 0"
-        id="video-target"
+      <!-- Entity bound to image target index 0 -->
+      <a-entity mindar-image-target="targetIndex: 0" id="target-0"
         pro-smooth="posAlpha: 0.35; rotAlpha: 0.35; bufferSize: 4"
-        target-video-fade="video: #ad-video; fadeDuration: 600"
-      >
-        <a-video
-          id="video-plane"
-          src="#ad-video"
-          width="1.02"
-          height="1.53"
-          position="0 0 0"
-          rotation="0 0 0"
-          material="shader: flat"
-        ></a-video>
+        target-video-fade="video: #ad-video-0; fadeDuration: 600">
+        <a-video src="#ad-video-0" width="1.02" height="1.53" position="0 0 0" rotation="0 0 0" material="shader: flat"></a-video>
+      </a-entity>
+
+      <!-- Entity bound to image target index 1 -->
+      <a-entity mindar-image-target="targetIndex: 1" id="target-1"
+        pro-smooth="posAlpha: 0.35; rotAlpha: 0.35; bufferSize: 4"
+        target-video-fade="video: #ad-video-1; fadeDuration: 600">
+        <a-video src="#ad-video-1" width="1.02" height="1.53" position="0 0 0" rotation="0 0 0" material="shader: flat"></a-video>
       </a-entity>
     </a-scene>
 
     <script>
       // ==================== State Management ====================
-      const state = {
-        audioUnlocked: false,
-        arReady: false,
-        cameraReady: false,
-        recording: false,
-        targetVisible: false,
-        recordingStartTime: 0,
-      };
+      const state = { audioUnlocked:false, arReady:false, cameraReady:false, recording:false, targetVisible:false, recordingStartTime:0 };
 
       // ==================== DOM Elements ====================
       const elements = {
@@ -794,31 +257,25 @@
         countdownOverlay: document.getElementById("countdown-overlay"),
         countdownNumber: document.getElementById("countdown-number"),
         sceneEl: document.getElementById("ar-scene"),
-        video: document.getElementById("ad-video"),
-        target: document.getElementById("video-target"),
         mixCanvas: document.getElementById("mix-canvas"),
+        overlayVideos: [],   // all <video> in <a-assets>
+        targets: []          // all [mindar-image-target] entities
       };
 
       // ==================== Recording Variables ====================
       let mixCtx, rafId;
       let cameraVideoEl = null;
-      let mediaRecorder,
-        chunks = [];
-      let audioCtx,
-        dest,
-        micStream = null;
+      let mediaRecorder, chunks = [];
+      let audioCtx, dest, micStream = null;
       let durationInterval = null;
+      const mediaElementSourceMap = new WeakMap(); // cache sources per video
 
-      // ==================== UI Helper Functions ====================
+      // ==================== UI Helpers ====================
       function showLoading(text = "Initializing AR...") {
         elements.loadingIndicator.querySelector("span").textContent = text;
         elements.loadingIndicator.classList.add("show");
       }
-
-      function hideLoading() {
-        elements.loadingIndicator.classList.remove("show");
-      }
-
+      function hideLoading() { elements.loadingIndicator.classList.remove("show"); }
       function updateTrackingStatus(isTracking) {
         state.targetVisible = isTracking;
         if (isTracking) {
@@ -832,37 +289,23 @@
           elements.trackingStatus.classList.add("searching");
           elements.statusText.textContent = "Searching for target...";
           elements.statusDot.classList.add("pulse");
-          if (state.arReady) {
-            elements.instructions.classList.add("show");
-          }
+          if (state.arReady) elements.instructions.classList.add("show");
         }
       }
-
-      function formatDuration(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}:${secs.toString().padStart(2, "0")}`;
-      }
-
+      function formatDuration(seconds) { const mins = Math.floor(seconds/60); const secs = seconds%60; return `${mins}:${secs.toString().padStart(2,"0")}`; }
       function updateRecordingDuration() {
         if (state.recording) {
-          const elapsed = Math.floor(
-            (Date.now() - state.recordingStartTime) / 1000
-          );
+          const elapsed = Math.floor((Date.now() - state.recordingStartTime) / 1000);
           elements.recDuration.textContent = formatDuration(elapsed);
         }
       }
-
       async function showCountdown() {
         elements.countdownOverlay.classList.add("show");
         for (let i = 3; i > 0; i--) {
           elements.countdownNumber.textContent = i;
-          elements.countdownNumber.style.animation = "none";
-          // Trigger reflow
-          void elements.countdownNumber.offsetWidth;
-          elements.countdownNumber.style.animation =
-            "countdownScale 1s ease-in-out";
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          elements.countdownNumber.style.animation = "none"; void elements.countdownNumber.offsetWidth;
+          elements.countdownNumber.style.animation = "countdownScale 1s ease-in-out";
+          await new Promise((r)=>setTimeout(r,1000));
         }
         elements.countdownOverlay.classList.remove("show");
       }
@@ -872,16 +315,14 @@
         try {
           showLoading("Unlocking media...");
 
-          // Unlock audio/video
-          await elements.video.play();
-          elements.video.pause();
+          // collect all overlay videos and unlock audio on each
+          elements.overlayVideos = Array.from(document.querySelectorAll('a-assets > video'));
+          for (const v of elements.overlayVideos) { try { await v.play(); v.pause(); } catch(_) {} }
           state.audioUnlocked = true;
 
-          // Hide start overlay with fade
+          // Hide start overlay
           elements.startOverlay.classList.add("fade-out");
-          setTimeout(() => {
-            elements.startOverlay.style.display = "none";
-          }, 300);
+          setTimeout(()=>{ elements.startOverlay.style.display="none"; }, 300);
 
           showLoading("Starting AR tracking...");
 
@@ -896,416 +337,156 @@
       });
 
       // ==================== AR Event Handlers ====================
-
-      // MindAR ready
       elements.sceneEl.addEventListener("arReady", () => {
         console.log("AR System Ready");
-        state.arReady = true;
-        hideLoading();
+        state.arReady = true; hideLoading();
 
-        // Show tracking status
         elements.trackingStatus.classList.add("show");
         updateTrackingStatus(false);
-
-        // Show instructions
         elements.instructions.classList.add("show");
 
-        // Find camera video element
+        // collect targets and listen for found/lost
+        elements.targets = Array.from(document.querySelectorAll('[mindar-image-target]'));
+        let visibleCount = 0;
+        elements.targets.forEach((t) => {
+          t.addEventListener("targetFound", () => { visibleCount++; updateTrackingStatus(true); });
+          t.addEventListener("targetLost",  () => { visibleCount = Math.max(0, visibleCount-1); updateTrackingStatus(visibleCount > 0); });
+        });
+
+        // Find the camera <video> element (the one with a MediaStream)
         setTimeout(() => {
           const vids = Array.from(document.querySelectorAll("video"));
-          cameraVideoEl = vids.find(
-            (v) => v !== elements.video && v.srcObject instanceof MediaStream
-          );
-
+          cameraVideoEl = vids.find((v) => v.srcObject instanceof MediaStream);
           if (cameraVideoEl) {
             state.cameraReady = true;
-            const settings =
-              cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() ||
-              {};
-            console.log(
-              "Camera ready:",
-              settings.width,
-              "x",
-              settings.height,
-              settings.frameRate || "fps?"
-            );
+            const settings = cameraVideoEl.srcObject.getVideoTracks()[0]?.getSettings?.() || {};
+            console.log("Camera ready:", settings.width, "x", settings.height, settings.frameRate || "fps?");
           } else {
             console.warn("Camera video element not found yet");
-            // Retry after a delay
             setTimeout(() => {
               const retryVids = Array.from(document.querySelectorAll("video"));
-              cameraVideoEl = retryVids.find(
-                (v) =>
-                  v !== elements.video && v.srcObject instanceof MediaStream
-              );
+              cameraVideoEl = retryVids.find((v)=> v.srcObject instanceof MediaStream);
               if (cameraVideoEl) state.cameraReady = true;
             }, 1000);
           }
         }, 500);
       });
 
-      // Target found
-      elements.target.addEventListener("targetFound", () => {
-        console.log("Target found");
-        updateTrackingStatus(true);
-        if (state.audioUnlocked) {
-          elements.video
-            .play()
-            .catch((e) => console.warn("Video play failed:", e));
-        }
-      });
-
-      // Target lost
-      elements.target.addEventListener("targetLost", () => {
-        console.log("Target lost");
-        updateTrackingStatus(false);
-        elements.video.pause();
-      });
-
       // ==================== Recording Functions ====================
-
       function pickMime() {
-        const prefs = [
-          "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-          "video/webm;codecs=vp9,opus",
-          "video/webm;codecs=vp8,opus",
-          "video/webm",
-        ];
-        return (
-          prefs.find(
-            (t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)
-          ) || ""
-        );
+        const prefs = ["video/mp4;codecs=avc1.42E01E,mp4a.40.2","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
+        return (prefs.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || "");
       }
 
       function sizeMixCanvas() {
         const camW = cameraVideoEl?.videoWidth || 0;
         const camH = cameraVideoEl?.videoHeight || 0;
         const sceneCanvas = elements.sceneEl?.canvas;
-
-        // Use scene canvas dimensions which match the viewport/display
-        // This ensures the recording matches what the user sees
         const w = sceneCanvas?.width || camW || 1280;
         const h = sceneCanvas?.height || camH || 720;
-
-        elements.mixCanvas.width = w;
-        elements.mixCanvas.height = h;
-
-        console.log(
-          "Recording canvas sized to:",
-          w,
-          "x",
-          h,
-          "| Camera:",
-          camW,
-          "x",
-          camH,
-          "| Scene:",
-          sceneCanvas?.width,
-          "x",
-          sceneCanvas?.height
-        );
-
-        if (!mixCtx)
-          mixCtx = elements.mixCanvas.getContext("2d", {
-            alpha: false,
-            desynchronized: true,
-            willReadFrequently: false,
-          });
+        elements.mixCanvas.width = w; elements.mixCanvas.height = h;
+        if (!mixCtx) mixCtx = elements.mixCanvas.getContext("2d", { alpha:false, desynchronized:true, willReadFrequently:false });
       }
 
       function drawComposite() {
         if (!state.recording) return;
-
         const sceneCanvas = elements.sceneEl.canvas;
-        if (!cameraVideoEl || !sceneCanvas) {
-          rafId = requestAnimationFrame(drawComposite);
-          return;
-        }
-
+        if (!cameraVideoEl || !sceneCanvas) { rafId = requestAnimationFrame(drawComposite); return; }
         try {
-          const canvasW = elements.mixCanvas.width;
-          const canvasH = elements.mixCanvas.height;
-
-          // Clear canvas
+          const canvasW = elements.mixCanvas.width, canvasH = elements.mixCanvas.height;
           mixCtx.clearRect(0, 0, canvasW, canvasH);
-
-          // Calculate aspect ratios
-          const camAspect =
-            cameraVideoEl.videoWidth / cameraVideoEl.videoHeight;
+          const camAspect = cameraVideoEl.videoWidth / cameraVideoEl.videoHeight;
           const canvasAspect = canvasW / canvasH;
-
-          let drawW,
-            drawH,
-            offsetX = 0,
-            offsetY = 0;
-
-          // Cover mode: scale camera to fill canvas while maintaining aspect ratio
-          if (camAspect > canvasAspect) {
-            // Camera is wider - fit to height
-            drawH = canvasH;
-            drawW = drawH * camAspect;
-            offsetX = (canvasW - drawW) / 2;
-          } else {
-            // Camera is taller - fit to width
-            drawW = canvasW;
-            drawH = drawW / camAspect;
-            offsetY = (canvasH - drawH) / 2;
-          }
-
-          // Draw camera feed with proper aspect ratio (cover mode)
-          mixCtx.drawImage(
-            cameraVideoEl,
-            0,
-            0,
-            cameraVideoEl.videoWidth,
-            cameraVideoEl.videoHeight,
-            offsetX,
-            offsetY,
-            drawW,
-            drawH
-          );
-
-          // Draw AR overlays on top (exact 1:1 mapping with scene canvas)
-          mixCtx.drawImage(
-            sceneCanvas,
-            0,
-            0,
-            sceneCanvas.width,
-            sceneCanvas.height,
-            0,
-            0,
-            canvasW,
-            canvasH
-          );
-        } catch (e) {
-          console.warn("Composite draw failed:", e);
-        }
-
+          let drawW, drawH, offsetX = 0, offsetY = 0;
+          if (camAspect > canvasAspect) { drawH = canvasH; drawW = drawH * camAspect; offsetX = (canvasW - drawW) / 2; }
+          else { drawW = canvasW; drawH = drawW / camAspect; offsetY = (canvasH - drawH) / 2; }
+          mixCtx.drawImage(cameraVideoEl, 0, 0, cameraVideoEl.videoWidth, cameraVideoEl.videoHeight, offsetX, offsetY, drawW, drawH);
+          mixCtx.drawImage(sceneCanvas, 0, 0, sceneCanvas.width, sceneCanvas.height, 0, 0, canvasW, canvasH);
+        } catch (e) { console.warn("Composite draw failed:", e); }
         rafId = requestAnimationFrame(drawComposite);
       }
 
       async function startCompositeRecording() {
-        if (
-          !state.cameraReady ||
-          !cameraVideoEl ||
-          !(cameraVideoEl.srcObject instanceof MediaStream)
-        ) {
-          alert("Camera not ready yet. Please wait a moment and try again.");
-          return;
-        }
+        if (!state.cameraReady || !cameraVideoEl || !(cameraVideoEl.srcObject instanceof MediaStream)) { alert("Camera not ready yet. Try again."); return; }
+        if (!elements.sceneEl.canvas) { alert("AR scene not ready. Try again."); return; }
 
-        if (!elements.sceneEl.canvas) {
-          alert("AR scene not ready. Please try again.");
-          return;
-        }
-
-        // Show countdown
         await showCountdown();
-
-        // Size mixer canvas
         sizeMixCanvas();
-
-        // Log dimensions for debugging
-        console.log(
-          "Camera video dimensions:",
-          cameraVideoEl.videoWidth,
-          "x",
-          cameraVideoEl.videoHeight
-        );
-        console.log(
-          "Scene canvas dimensions:",
-          elements.sceneEl.canvas.width,
-          "x",
-          elements.sceneEl.canvas.height
-        );
-        console.log(
-          "Mix canvas dimensions:",
-          elements.mixCanvas.width,
-          "x",
-          elements.mixCanvas.height
-        );
-
-        // Start composite drawing
         cancelAnimationFrame(rafId);
         state.recording = true;
         drawComposite();
 
-        // Capture video from mixer canvas at optimal frame rate
         const fps = 30;
         const captureStream = elements.mixCanvas.captureStream(fps);
         const videoTrack = captureStream.getVideoTracks()[0];
-
-        const trackSettings = videoTrack.getSettings();
-        console.log("Recording track settings:", trackSettings);
-        console.log(
-          "Aspect ratio check - Width:",
-          trackSettings.width,
-          "Height:",
-          trackSettings.height,
-          "Ratio:",
-          (trackSettings.width / trackSettings.height).toFixed(2)
-        );
 
         // Setup audio mixing
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         dest = audioCtx.createMediaStreamDestination();
 
-        // Route overlay video audio
-        const vSrc = audioCtx.createMediaElementSource(elements.video);
-        vSrc.connect(dest);
-        vSrc.connect(audioCtx.destination);
-
-        // Always include microphone
-        try {
-          micStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
-          const mSrc = audioCtx.createMediaStreamSource(micStream);
-          mSrc.connect(dest);
-        } catch (e) {
-          console.warn("Microphone access denied:", e);
-          // Continue recording without mic
+        // Route ALL overlay videos (reuse cached MediaElementSourceNodes safely)
+        for (const v of elements.overlayVideos) {
+          try {
+            let src = mediaElementSourceMap.get(v);
+            if (!src) { src = audioCtx.createMediaElementSource(v); mediaElementSourceMap.set(v, src); }
+            // reset old connections (avoid stacking between recordings)
+            try { src.disconnect(); } catch(_) {}
+            src.connect(dest);
+            src.connect(audioCtx.destination); // local monitor
+          } catch (e) {
+            console.warn("Audio routing issue for a video element:", e);
+          }
         }
 
-        // Create output stream
-        const outStream = new MediaStream([
-          videoTrack,
-          ...dest.stream.getAudioTracks(),
-        ]);
-        const mime = pickMime();
+        // Mic (optional)
+        try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); audioCtx.createMediaStreamSource(micStream).connect(dest); }
+        catch (e) { console.warn("Microphone access denied:", e); }
 
-        const recordingOptions = {
-          mimeType: mime,
-          videoBitsPerSecond: 8_000_000,
-        };
-
-        console.log("MediaRecorder options:", recordingOptions);
+        const outStream = new MediaStream([ videoTrack, ...dest.stream.getAudioTracks() ]);
+        const recordingOptions = { mimeType: pickMime(), videoBitsPerSecond: 8_000_000 };
 
         mediaRecorder = new MediaRecorder(outStream, recordingOptions);
         chunks = [];
-
-        mediaRecorder.ondataavailable = (e) => {
-          if (e.data && e.data.size) chunks.push(e.data);
-        };
-
+        mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
         mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, {
-            type: mediaRecorder.mimeType || "video/webm",
-          });
+          const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "video/webm" });
           const url = URL.createObjectURL(blob);
-
-          console.log(
-            "Recording stopped. Blob size:",
-            (blob.size / 1024 / 1024).toFixed(2),
-            "MB"
-          );
-          console.log(
-            "Recording dimensions were:",
-            elements.mixCanvas.width,
-            "x",
-            elements.mixCanvas.height
-          );
-
-          // Auto-download the recording
           const downloadLink = document.createElement("a");
           downloadLink.href = url;
-          downloadLink.download = (mediaRecorder.mimeType || "").includes("mp4")
-            ? "ar-recording.mp4"
-            : "ar-recording.webm";
-          document.body.appendChild(downloadLink);
-          downloadLink.click();
-          document.body.removeChild(downloadLink);
-
-          // Cleanup URL after a delay to ensure download starts
+          downloadLink.download = (mediaRecorder.mimeType || "").includes("mp4") ? "ar-recording.mp4" : "ar-recording.webm";
+          document.body.appendChild(downloadLink); downloadLink.click(); document.body.removeChild(downloadLink);
           setTimeout(() => URL.revokeObjectURL(url), 100);
 
-          // Cleanup
           cancelAnimationFrame(rafId);
-          if (micStream) {
-            micStream.getTracks().forEach((t) => t.stop());
-            micStream = null;
-          }
-          try {
-            audioCtx.close();
-          } catch (_) {}
+          if (micStream) { micStream.getTracks().forEach((t)=>t.stop()); micStream = null; }
+          try { audioCtx.close(); } catch(_) {}
 
-          // Update UI - back to camera mode
           state.recording = false;
           elements.captureBtn.classList.remove("recording");
           elements.recStatus.classList.remove("show");
           clearInterval(durationInterval);
         };
 
-        // Resume AudioContext if suspended
         if (audioCtx.state === "suspended") await audioCtx.resume();
-
-        // Start recording
         mediaRecorder.start();
         state.recordingStartTime = Date.now();
-
-        // Update UI - show recording state
         elements.captureBtn.classList.add("recording");
         elements.recStatus.classList.add("show");
         elements.recDuration.textContent = "0:00";
-
-        // Start duration counter
         durationInterval = setInterval(updateRecordingDuration, 1000);
       }
 
-      function stopCompositeRecording() {
-        if (mediaRecorder && state.recording) {
-          mediaRecorder.stop();
-        }
-      }
+      function stopCompositeRecording() { if (mediaRecorder && state.recording) mediaRecorder.stop(); }
 
       // ==================== Event Listeners ====================
+      elements.captureBtn.addEventListener("click", () => { if (!state.recording) startCompositeRecording(); else stopCompositeRecording(); });
 
-      elements.captureBtn.addEventListener("click", () => {
-        if (!state.recording) {
-          startCompositeRecording();
-        } else {
-          stopCompositeRecording();
-        }
-      });
-
-      // Prevent accidental page closure during recording
-      window.addEventListener("beforeunload", (e) => {
-        if (state.recording) {
-          e.preventDefault();
-          e.returnValue = "";
-        }
-      });
+      window.addEventListener("beforeunload", (e) => { if (state.recording) { e.preventDefault(); e.returnValue = ""; } });
 
       // ==================== Prevent Scrolling ====================
-
-      // Prevent any scrolling on the page
-      window.addEventListener(
-        "scroll",
-        (e) => {
-          window.scrollTo(0, 0);
-          e.preventDefault();
-        },
-        { passive: false }
-      );
-
-      // Prevent touch-move scrolling
-      document.body.addEventListener(
-        "touchmove",
-        (e) => {
-          // Allow scrolling only on specific interactive elements
-          if (!e.target.closest("#capture-btn, button, input")) {
-            e.preventDefault();
-          }
-        },
-        { passive: false }
-      );
-
-      // Lock scroll position on load
-      window.scrollTo(0, 0);
-      document.body.style.position = "fixed";
-      document.body.style.width = "100%";
-      document.body.style.height = "100%";
+      window.addEventListener("scroll", (e) => { window.scrollTo(0,0); e.preventDefault(); }, { passive:false });
+      document.body.addEventListener("touchmove", (e) => { if (!e.target.closest("#capture-btn, button, input")) e.preventDefault(); }, { passive:false });
+      window.scrollTo(0,0); document.body.style.position="fixed"; document.body.style.width="100%"; document.body.style.height="100%";
     </script>
   </body>
 </html>
