@@ -2,314 +2,184 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>AR Experience — Image Tracking + Recording</title>
+    <title>AR — Image Tracking + Video Overlay (No-BS Fix)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <!-- A-Frame + extras + MindAR -->
+    <!-- A-Frame + MindAR -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.0.0/dist/aframe-extras.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
-    <script>
-      /* ---------- Smoothing (child follows parent; no tug-of-war) ---------- */
-      class PoseBuffer {
-        constructor(size = 3) { this.size = size; this.positions = []; this.quaternions = []; }
-        add(pos, quat) {
-          this.positions.push(pos.clone()); this.quaternions.push(quat.clone());
-          if (this.positions.length > this.size) { this.positions.shift(); this.quaternions.shift(); }
-        }
-        getAveraged() {
-          if (!this.positions.length) return null;
-          const avgPos = new THREE.Vector3(); this.positions.forEach(p => avgPos.add(p)); avgPos.divideScalar(this.positions.length);
-          const avgQuat = this.quaternions[0].clone(); for (let i=1;i<this.quaternions.length;i++) avgQuat.slerp(this.quaternions[i], 1/(i+1));
-          return { position: avgPos, quaternion: avgQuat };
-        }
-        clear(){ this.positions = []; this.quaternions = []; }
-      }
-      class DoubleExpSmooth {
-        constructor(alpha=0.25, beta=0.175){ this.alpha=alpha; this.beta=beta; this.level=null; this.trend=null; }
-        update(v){ if(!this.level){ this.level=v.clone(); this.trend=new THREE.Vector3(); return v.clone(); }
-          const prev=this.level.clone(); this.level.lerp(v,this.alpha); const newTrend=this.level.clone().sub(prev); this.trend.lerp(newTrend,this.beta);
-          return this.level.clone().add(this.trend);
-        }
-        reset(){ this.level=null; this.trend=null; }
-      }
-      AFRAME.registerComponent("pro-smooth", {
-        schema:{posAlpha:{type:"number",default:0.25},rotAlpha:{type:"number",default:0.25},bufferSize:{type:"number",default:3}},
-        init(){
-          this.marker3D=this.el.parentEl.object3D; this.self3D=this.el.object3D;
-          this.poseBuffer=new PoseBuffer(this.data.bufferSize);
-          this.posSmooth=new DoubleExpSmooth(this.data.posAlpha,this.data.posAlpha*0.7);
-          this.smoothPos=new THREE.Vector3(); this.smoothQuat=new THREE.Quaternion();
-          this.prevPos=new THREE.Vector3(); this.prevVel=new THREE.Vector3(); this.vel=new THREE.Vector3(); this.acc=new THREE.Vector3();
-          this.firstFrames=0;
-          const reset=()=>{ this.poseBuffer.clear(); this.posSmooth.reset(); this.firstFrames=0; };
-          this.el.parentEl.addEventListener("targetFound", reset);
-          this.el.parentEl.addEventListener("targetLost",  reset);
-        },
-        tick(t,dtMs){
-          if(!this.marker3D.visible) return;
-          const dt=Math.max(0.001,dtMs/1000);
-          const rawPos=new THREE.Vector3(), rawQuat=new THREE.Quaternion();
-          this.marker3D.getWorldPosition(rawPos); this.marker3D.getWorldQuaternion(rawQuat);
-          this.vel.copy(rawPos).sub(this.prevPos).divideScalar(dt);
-          this.acc.copy(this.vel).sub(this.prevVel).divideScalar(dt);
-          const speed=this.vel.length(), accel=this.acc.length();
-          this.prevPos.copy(rawPos); this.prevVel.copy(this.vel);
-          this.poseBuffer.add(rawPos,rawQuat);
-          const avg=this.poseBuffer.getAveraged(); if(!avg) return;
-          if(this.firstFrames<5){ this.smoothPos.copy(avg.position); this.smoothQuat.copy(avg.quaternion); this.firstFrames++; }
-          else {
-            const predicted=this.posSmooth.update(avg.position);
-            const a=Math.min(0.25+speed*0.12+accel*0.04,0.6);
-            this.smoothPos.lerp(predicted,a);
-            const r=Math.min(0.25+speed*0.10+accel*0.03,0.55);
-            this.smoothQuat.slerp(avg.quaternion,r);
-          }
-          this.self3D.position.copy(this.smoothPos);
-          this.self3D.quaternion.copy(this.smoothQuat);
-        }
-      });
-
-      /* ---------- Fade the video when the TARGET is found/lost (on PARENT) ---------- */
-      AFRAME.registerComponent("target-video-fade", {
-        schema:{ video:{type:"selector"}, fadeDuration:{type:"number", default:600} },
-        init(){
-          this.video=this.data.video; this.material=null; this.fading=false; this.targetOpacity=0; this.currentOpacity=0;
-          setTimeout(()=>{
-            const videoPlane=this.el.querySelector("a-video");
-            if(videoPlane){ this.material=videoPlane.getObject3D("mesh").material; this.material.transparent=true; this.material.opacity=0; }
-          },100);
-          this.el.addEventListener("targetFound", ()=>{ if(this.video && this.video.paused) this.video.play(); this.targetOpacity=1; this.fading=true; });
-          this.el.addEventListener("targetLost",  ()=>{ this.targetOpacity=0; this.fading=true; if(this.video) this.video.pause(); });
-        },
-        tick(time,dt){
-          if(!this.material || !this.fading) return;
-          const step=dt/this.data.fadeDuration;
-          this.currentOpacity = (this.targetOpacity>this.currentOpacity)
-            ? Math.min(this.currentOpacity+step,1)
-            : Math.max(this.currentOpacity-step,0);
-          this.material.opacity=this.currentOpacity;
-          if(Math.abs(this.currentOpacity-this.targetOpacity)<0.01){ this.currentOpacity=this.targetOpacity; this.fading=false; }
-        }
-      });
-    </script>
-
     <style>
-      *{box-sizing:border-box} html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;position:fixed;overscroll-behavior:none;-webkit-overflow-scrolling:touch;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif}
-      #start-overlay{position:fixed;inset:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:#fff;z-index:999;display:flex;flex-direction:column;justify-content:center;align-items:center;transition:opacity .3s}
-      #start-overlay.fade-out{opacity:0;pointer-events:none}
-      #start-button{padding:16px 48px;font-size:18px;font-weight:600;background:#fff;color:#667eea;border:0;border-radius:50px;cursor:pointer;box-shadow:0 4px 15px rgba(0,0,0,.2)}
-      #loading-indicator,#tracking-status{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:12px 24px;border-radius:25px;z-index:998;display:none;align-items:center;gap:12px;backdrop-filter:blur(10px)}
-      #loading-indicator.show,#tracking-status.show{display:flex}
-      #tracking-status.tracking{background:rgba(16,185,129,.9)} #tracking-status.searching{background:rgba(245,158,11,.9)}
-      #instructions{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:16px 24px;border-radius:20px;z-index:996;text-align:center;max-width:90%;backdrop-filter:blur(10px);display:none}
-      #instructions.show{display:block}
-      #rec-controls{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;align-items:center;gap:20px}
-      #rec-status{display:flex;align-items:center;gap:12px;background:rgba(0,0,0,.75);padding:10px 20px;border-radius:25px;backdrop-filter:blur(10px);opacity:0;transition:opacity .3s}
-      #rec-status.show{opacity:1}
-      .rec-indicator{width:12px;height:12px;background:#ef4444;border-radius:50%;animation:recordingPulse 1.5s ease-in-out infinite}
-      @keyframes recordingPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
-      #rec-duration{font-size:18px;font-weight:600;color:#fff;min-width:50px;font-variant-numeric:tabular-nums}
-      #capture-btn{width:70px;height:70px;border-radius:50%;background:#fff;border:5px solid rgba(255,255,255,.3);cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(0,0,0,.3);-webkit-tap-highlight-color:transparent}
-      .capture-inner{width:56px;height:56px;background:#ef4444;border-radius:50%;transition:all .3s}
-      #capture-btn.recording .capture-inner{width:28px;height:28px;border-radius:6px}
-      #countdown-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10000;display:none;justify-content:center;align-items:center;backdrop-filter:blur(5px)}
-      #countdown-overlay.show{display:flex} #countdown-number{font-size:120px;font-weight:700;color:#fff;animation:countdownScale 1s ease-in-out}
-      @keyframes countdownScale{0%{transform:scale(.5);opacity:0}50%{transform:scale(1.2);opacity:1}100%{transform:scale(1);opacity:1}}
-      a-scene{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;overflow:hidden} a-scene canvas{object-fit:cover}
-      .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
-      @keyframes spin{to{transform:rotate(360deg)}}
+      html,body{margin:0;height:100%;overflow:hidden;position:fixed}
+      #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;color:#fff;z-index:999}
+      #log{position:fixed;bottom:8px;left:8px;right:8px;max-height:38vh;overflow:auto;background:rgba(0,0,0,.6);color:#0f0;font:12px/1.4 monospace;padding:8px;border-radius:6px;z-index:998}
+      #status{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:8px 14px;border-radius:18px;z-index:997}
+      a-scene{position:fixed;inset:0}
     </style>
   </head>
-
   <body>
-    <!-- Use a UNIQUE sub-region of your poster to compile targets.mind (feature-dense, non-repeating). -->
+    <div id="start"><button id="go" style="font-size:18px;padding:12px 24px">Start</button></div>
+    <div id="status">Waiting…</div>
+    <pre id="log"></pre>
 
-    <!-- Start Overlay -->
-    <div id="start-overlay">
-      <h1>🎯 AR Image Tracking Experience</h1>
-      <p>Point your camera at the target image.</p>
-      <button id="start-button">Start Experience</button>
-    </div>
-
-    <!-- Loading / Status / Instructions -->
-    <div id="loading-indicator"><div class="spinner"></div><span>Initializing AR...</span></div>
-    <div id="tracking-status"><span id="status-text">Searching for target...</span></div>
-    <div id="instructions"><strong>📱 Point your camera at the target</strong><br/>Move slowly and keep it fully in view</div>
-
-    <!-- Camera-style controls -->
-    <div id="rec-controls">
-      <div id="rec-status"><div class="rec-indicator"></div><span id="rec-duration">0:00</span></div>
-      <button id="capture-btn"><div class="capture-inner"></div></button>
-    </div>
-
-    <!-- Countdown + Mixer -->
-    <div id="countdown-overlay"><div id="countdown-number">3</div></div>
-    <canvas id="mix-canvas" style="display:none"></canvas>
-
-    <!-- Scene -->
     <a-scene
       mindar-image="
         imageTargetSrc: ./targets.mind;
         autoStart: false;
         uiScanning: auto; uiLoading: auto;
-        filterMinCF: 0.001;
-        filterBeta: 10;
-        warmupTolerance: 5;
-        missTolerance: 5
+        filterMinCF: 0.001; filterBeta: 10; warmupTolerance: 5; missTolerance: 5
       "
       embedded
       color-space="sRGB"
-      renderer="colorManagement: true, physicallyCorrectLights: true, antialias: true, precision: highp, logarithmicDepthBuffer: true"
+      renderer="antialias: true; precision: highp; physicallyCorrectLights: true; logarithmicDepthBuffer: true"
       vr-mode-ui="enabled: false"
       device-orientation-permission-ui="enabled: true"
-      id="ar-scene"
-    >
+      id="scene">
       <a-assets>
-        <!-- playsinline helps iOS render inline; we start playback after user click -->
-        <video id="ad-video" src="./overlay.mp4" preload="auto" crossorigin="anonymous" playsinline webkit-playsinline loop></video>
+        <!-- iOS-friendly: playsinline + muted; we unmute later if you want audio -->
+        <video id="overlayVid"
+               src="./overlay.mp4"
+               preload="auto"
+               muted
+               playsinline
+               webkit-playsinline
+               crossorigin="anonymous"
+               loop></video>
       </a-assets>
 
-      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-camera position="0 0 0" look-controls="enabled:false"></a-camera>
 
-      <!-- Parent = MindAR anchor; Fade is attached HERE (Option A) -->
-      <a-entity mindar-image-target="targetIndex: 0" id="video-target"
-                target-video-fade="video: #ad-video; fadeDuration: 600">
-        <!-- Child is smoothed toward parent -->
-        <a-entity id="smooth-container" pro-smooth="posAlpha:0.25; rotAlpha:0.25; bufferSize:3">
-          <a-video id="video-plane" src="#ad-video"
-                   width="1.02" height="1.53"
-                   position="0 0 0" rotation="0 0 0"
-                   material="shader: flat"></a-video>
-        </a-entity>
+      <!-- Anchor receives targetFound/targetLost -->
+      <a-entity mindar-image-target="targetIndex: 0" id="anchor">
+        <!-- Content we show; give it a tiny +Z to avoid any z artifacts and draw both sides -->
+        <a-video id="plane"
+                 src="#overlayVid"
+                 position="0 0 0.001"
+                 width="1"
+                 height="0.56"
+                 material="shader:flat; transparent:true; opacity:1; side:double">
+        </a-video>
       </a-entity>
     </a-scene>
 
     <script>
-      const state={audioUnlocked:false, arReady:false, cameraReady:false, recording:false, targetVisible:false, recordingStartTime:0};
-      const el={
-        startButton:document.getElementById("start-button"),
-        startOverlay:document.getElementById("start-overlay"),
-        loading:document.getElementById("loading-indicator"),
-        tracking:document.getElementById("tracking-status"),
-        statusText:document.getElementById("status-text"),
-        instructions:document.getElementById("instructions"),
-        scene:document.getElementById("ar-scene"),
-        video:document.getElementById("ad-video"),
-        target:document.getElementById("video-target"),
-        captureBtn:document.getElementById("capture-btn"),
-        recStatus:document.getElementById("rec-status"),
-        recDuration:document.getElementById("rec-duration"),
-        countdownOverlay:document.getElementById("countdown-overlay"),
-        countdownNumber:document.getElementById("countdown-number"),
-        mixCanvas:document.getElementById("mix-canvas")
-      };
+      const $ = s => document.querySelector(s);
+      const log = (...a) => { const p = $('#log'); p.textContent += a.map(x => typeof x==='string'?x:JSON.stringify(x)).join(' ') + '\n'; p.scrollTop = p.scrollHeight; };
+      const setStatus = t => $('#status').textContent = t;
 
-      const showLoading=(t="Initializing AR...")=>{ el.loading.querySelector("span").textContent=t; el.loading.classList.add("show"); };
-      const hideLoading=()=>{ el.loading.classList.remove("show"); };
-      function updateTrackingStatus(isTracking){
-        state.targetVisible=isTracking; el.tracking.classList.add("show");
-        if(isTracking){ el.tracking.classList.add("tracking"); el.tracking.classList.remove("searching"); el.statusText.textContent="Target Locked ✓"; el.instructions.classList.remove("show"); }
-        else{ el.tracking.classList.remove("tracking"); el.tracking.classList.add("searching"); el.statusText.textContent="Searching for target..."; if(state.arReady) el.instructions.classList.add("show"); }
-      }
-      const formatDuration=s=>`${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
-      const updateRecDuration=()=>{ if(state.recording) el.recDuration.textContent=formatDuration(Math.floor((Date.now()-state.recordingStartTime)/1000)); };
-      async function showCountdown(){
-        el.countdownOverlay.classList.add("show");
-        for(let i=3;i>0;i--){ el.countdownNumber.textContent=i; el.countdownNumber.style.animation="none"; void el.countdownNumber.offsetWidth; el.countdownNumber.style.animation="countdownScale 1s ease-in-out"; await new Promise(r=>setTimeout(r,1000)); }
-        el.countdownOverlay.classList.remove("show");
+      const scene = $('#scene');
+      const anchor = $('#anchor');
+      const plane  = $('#plane');
+      const vid    = $('#overlayVid');
+
+      // --- Hard rules ---
+      // 1) Start video playback on user gesture (iOS requirement). 2) Rebind the material when target is found.
+      // 3) Verify mesh/material presence; re-grab if A-Frame replaces it.
+
+      async function unlockMediaOnce() {
+        try {
+          vid.muted = true;                   // required for reliable iOS playback
+          await vid.play();                   // play on user gesture
+          vid.pause();                        // pause immediately; we resume on targetFound
+          log('unlockMediaOnce: ok. readyState=', vid.readyState, 'paused=', vid.paused);
+        } catch (e) {
+          log('unlockMediaOnce: FAILED', e && e.message);
+        }
       }
 
-      const isInAppBrowser=()=>/FBAN|FBAV|Instagram|Line\/|Twitter|Snapchat|TikTok|WeChat|Weibo/i.test(navigator.userAgent);
+      function bindVideoMaterial() {
+        // Ensure the a-video mesh exists and has a transparent, double-sided material
+        const mesh = plane.getObject3D('mesh');
+        if (!mesh) { log('bindVideoMaterial: mesh not ready yet'); return false; }
 
-      el.startButton.addEventListener("click", async ()=>{
-        try{
-          if(!window.isSecureContext){ alert("Camera is blocked on HTTP. Open this page over HTTPS."); return; }
-          if(isInAppBrowser()){ alert("Open this link in Safari. Many in-app browsers restrict camera access."); return; }
+        plane.setAttribute('material', 'shader:flat; transparent:true; opacity:1; side:double;');
+        plane.setAttribute('src', '#overlayVid');    // reassert binding
 
-          showLoading("Unlocking media...");
-          await el.video.play(); el.video.pause(); state.audioUnlocked=true;
+        // In case we need to poke the underlying material/texture:
+        const mat = mesh.material;
+        if (mat && mat.map) { mat.needsUpdate = true; }
+        log('bindVideoMaterial: ok. mat?', !!mat, 'map?', !!(mat && mat.map));
+        return true;
+      }
 
-          el.startOverlay.classList.add("fade-out"); setTimeout(()=>{ el.startOverlay.style.display="none"; },300);
+      function forceVideoDimsToTarget() {
+        // Optional: adjust plane to your target’s aspect. Change numbers if your poster isn’t 16:9.
+        const aspect = vid.videoWidth && vid.videoHeight ? vid.videoWidth / vid.videoHeight : (16/9);
+        plane.setAttribute('width', 1.02);          // your previous width
+        plane.setAttribute('height', 1.02 / aspect);
+        log('forceVideoDimsToTarget: aspect=', aspect.toFixed(3));
+      }
 
-          showLoading("Starting AR tracking...");
-          const arSystem=el.scene.systems["mindar-image-system"];
-          try{ await arSystem.start(); }
-          catch(err){ console.error("MindAR start failed:", err.name, err.message);
-            alert(`Failed to start AR:\n${err.name}: ${err.message}\n\nTips:\n• Use Safari on iOS\n• Use HTTPS\n• Allow camera access`);
-            hideLoading(); return;
+      async function startAR() {
+        const sys = scene.systems['mindar-image-system'];
+        await sys.start();
+      }
+
+      $('#go').addEventListener('click', async ()=>{
+        if (!window.isSecureContext) { alert('Use HTTPS or camera is blocked.'); return; }
+        await unlockMediaOnce();
+        $('#start').style.display='none';
+        setStatus('Starting AR…');
+        try { await startAR(); } catch (e){ log('MindAR start failed', e.message); alert('AR failed: ' + e.message); return; }
+      });
+
+      // Scene ready
+      scene.addEventListener('arReady', ()=>{
+        setStatus('Point at target');
+        log('arReady');
+      });
+
+      // Robust mesh availability hook
+      plane.addEventListener('object3dset', (e)=>{
+        if (e.detail && e.detail.type === 'mesh') {
+          log('plane mesh set; binding material now');
+          bindVideoMaterial();
+        }
+      });
+
+      // Anchor events — these fire on the entity with mindar-image-target (documented)
+      anchor.addEventListener('targetFound', async ()=>{
+        setStatus('Target Locked ✓');
+        log('targetFound: trying to play video. readyState=', vid.readyState, 'paused=', vid.paused);
+
+        // On first lock, ensure plane material is bound and dimensions match
+        bindVideoMaterial();
+        forceVideoDimsToTarget();
+
+        try {
+          // iOS: if this rejects due to policies, we already had a user gesture; keep muted.
+          await vid.play();
+          log('video.play(): OK');
+        } catch (e) {
+          log('video.play(): failed -> retry muted', e && e.message);
+          try {
+            vid.muted = true;
+            await vid.play();
+            log('video.play() after mute: OK');
+          } catch (e2) {
+            log('video.play() still failed:', e2 && e2.message);
           }
-        }catch(e){ console.error("Start failed:", e); alert(`Failed to start: ${e?.message||e}`); hideLoading(); }
+        }
       });
 
-      el.scene.addEventListener("arReady", ()=>{
-        state.arReady=true; hideLoading(); updateTrackingStatus(false); el.instructions.classList.add("show");
-        setTimeout(()=>{
-          const vids=Array.from(document.querySelectorAll("video"));
-          const cam=vids.find(v=>v!==el.video && v.srcObject instanceof MediaStream);
-          window.__cameraVideoEl = cam || null;
-          if(cam){ state.cameraReady=true; const s=cam.srcObject.getVideoTracks()[0]?.getSettings?.()||{}; console.log("Camera:",s.width,"x",s.height,s.frameRate||"fps?"); }
-        },500);
+      anchor.addEventListener('targetLost', ()=>{
+        setStatus('Searching…');
+        try { vid.pause(); } catch(_) {}
+        log('targetLost: paused video');
       });
 
-      el.target.addEventListener("targetFound", ()=>{ updateTrackingStatus(true); if(state.audioUnlocked) el.video.play().catch(()=>{}); });
-      el.target.addEventListener("targetLost",  ()=>{ updateTrackingStatus(false); el.video.pause(); });
+      // Safety net: if mesh wasn’t ready at init, poll briefly until it is
+      let tries = 0;
+      const poll = setInterval(()=>{
+        if (bindVideoMaterial()) { clearInterval(poll); }
+        if (++tries > 120) clearInterval(poll); // ~2s
+      }, 16);
 
-      /* ---------- Recording (MP4 first on Safari) ---------- */
-      let mediaRecorder,chunks=[],audioCtx,dest,micStream=null,rafId=null,durationInterval=null,mixCtx=null;
-      const pickMime=()=>['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
-        .find(t=>window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
-
-      function sizeMixCanvas(){
-        const c=el.scene?.canvas, w=c?.width||1280, h=c?.height||720; el.mixCanvas.width=w; el.mixCanvas.height=h;
-        if(!mixCtx) mixCtx=el.mixCanvas.getContext("2d",{alpha:false,desynchronized:true});
-      }
-      function drawComposite(){
-        if(!state.recording) return;
-        const sceneCanvas=el.scene.canvas, cam=window.__cameraVideoEl;
-        if(!cam || !sceneCanvas){ rafId=requestAnimationFrame(drawComposite); return; }
-        try{
-          const W=el.mixCanvas.width,H=el.mixCanvas.height; mixCtx.clearRect(0,0,W,H);
-          const camAspect=cam.videoWidth/cam.videoHeight, cvsAspect=W/H; let dw,dh,ox=0,oy=0;
-          if(camAspect>cvsAspect){ dh=H; dw=dh*camAspect; ox=(W-dw)/2; } else { dw=W; dh=dw/camAspect; oy=(H-dh)/2; }
-          mixCtx.drawImage(cam,0,0,cam.videoWidth,cam.videoHeight,ox,oy,dw,dh);
-          mixCtx.drawImage(sceneCanvas,0,0,sceneCanvas.width,sceneCanvas.height,0,0,W,H);
-        }catch(e){ console.warn("Composite draw failed:",e); }
-        rafId=requestAnimationFrame(drawComposite);
-      }
-      async function startRecording(){
-        if(!state.cameraReady || !window.__cameraVideoEl){ alert("Camera not ready yet. Try again in a second."); return; }
-        if(!el.scene.canvas){ alert("AR scene not ready. Please try again."); return; }
-        await showCountdown();
-        sizeMixCanvas(); cancelAnimationFrame(rafId); state.recording=true; drawComposite();
-
-        const stream=el.mixCanvas.captureStream(30), videoTrack=stream.getVideoTracks()[0];
-        audioCtx=new (window.AudioContext||window.webkitAudioContext)(); dest=audioCtx.createMediaStreamDestination();
-        try{ const vSrc=audioCtx.createMediaElementSource(el.video); vSrc.connect(dest); vSrc.connect(audioCtx.destination);}catch(_){}
-        try{ micStream=await navigator.mediaDevices.getUserMedia({audio:true}); const mSrc=audioCtx.createMediaStreamSource(micStream); mSrc.connect(dest);}catch(e){ console.warn("Mic denied:",e); }
-        const outStream=new MediaStream([videoTrack, ...dest.stream.getAudioTracks()]);
-        const mime=pickMime(); const opts={mimeType:mime, videoBitsPerSecond:8_000_000};
-        mediaRecorder=new MediaRecorder(outStream,opts); chunks=[];
-        mediaRecorder.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-        mediaRecorder.onstop=()=>{
-          const blob=new Blob(chunks,{type:mediaRecorder.mimeType||"video/webm"}), url=URL.createObjectURL(blob);
-          const a=document.createElement("a"); a.href=url; a.download=(mediaRecorder.mimeType||"").includes("mp4")?"ar-recording.mp4":"ar-recording.webm"; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-          setTimeout(()=>URL.revokeObjectURL(url),200);
-          cancelAnimationFrame(rafId); if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
-          try{ audioCtx.close(); }catch(_){} state.recording=false; el.captureBtn.classList.remove("recording"); el.recStatus.classList.remove("show"); clearInterval(durationInterval);
-        };
-        if(audioCtx.state==="suspended") await audioCtx.resume();
-        mediaRecorder.start(); state.recordingStartTime=Date.now();
-        el.captureBtn.classList.add("recording"); el.recStatus.classList.add("show"); el.recDuration.textContent="0:00";
-        durationInterval=setInterval(()=>el.recDuration.textContent=formatDuration(Math.floor((Date.now()-state.recordingStartTime)/1000)),1000);
-      }
-      function stopRecording(){ if(mediaRecorder && state.recording) mediaRecorder.stop(); }
-      el.captureBtn.addEventListener("click", ()=>{ !state.recording ? startRecording() : stopRecording(); });
-
-      window.addEventListener("beforeunload",(e)=>{ if(state.recording){ e.preventDefault(); e.returnValue=""; } });
-      window.scrollTo(0,0); document.body.style.position="fixed"; document.body.style.width="100%"; document.body.style.height="100%";
-      document.body.addEventListener("touchmove",(e)=>{ if(!e.target.closest("#capture-btn, button, input")) e.preventDefault(); },{passive:false});
+      // Debug: tap anywhere to log current state
+      window.addEventListener('click', ()=>{
+        const mesh = plane.getObject3D('mesh');
+        log('tap: mesh?', !!mesh, 'opacity attr=', plane.getAttribute('material')?.opacity, 'video paused=', vid.paused, 'time=', vid.currentTime.toFixed(2));
+      });
     </script>
   </body>
 </html>
