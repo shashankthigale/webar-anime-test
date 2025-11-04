@@ -1,185 +1,168 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>AR — Image Tracking + Video Overlay (No-BS Fix)</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<head>
+  <meta charset="utf-8" />
+  <title>WebAR — MindAR + Forced VideoTexture</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <!-- A-Frame + MindAR -->
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+  <!-- A-Frame + MindAR -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
-    <style>
-      html,body{margin:0;height:100%;overflow:hidden;position:fixed}
-      #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#111;color:#fff;z-index:999}
-      #log{position:fixed;bottom:8px;left:8px;right:8px;max-height:38vh;overflow:auto;background:rgba(0,0,0,.6);color:#0f0;font:12px/1.4 monospace;padding:8px;border-radius:6px;z-index:998}
-      #status{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:8px 14px;border-radius:18px;z-index:997}
-      a-scene{position:fixed;inset:0}
-    </style>
-  </head>
-  <body>
-    <div id="start"><button id="go" style="font-size:18px;padding:12px 24px">Start</button></div>
-    <div id="status">Waiting…</div>
-    <pre id="log"></pre>
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;position:fixed}
+    #gate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0b1020;color:#fff;z-index:999}
+    #status{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:8px 14px;border-radius:18px;z-index:998}
+    #log{position:fixed;bottom:8px;left:8px;right:8px;max-height:40vh;overflow:auto;background:rgba(0,0,0,.6);color:#0f0;font:12px/1.35 monospace;padding:8px;border-radius:6px;z-index:997}
+    a-scene{position:fixed;inset:0}
+  </style>
+</head>
+<body>
+  <div id="gate"><button id="start" style="font-size:18px;padding:12px 24px">Start</button></div>
+  <div id="status">Waiting…</div>
+  <pre id="log"></pre>
 
-    <a-scene
-      mindar-image="
-        imageTargetSrc: ./targets.mind;
-        autoStart: false;
-        uiScanning: auto; uiLoading: auto;
-        filterMinCF: 0.001; filterBeta: 10; warmupTolerance: 5; missTolerance: 5
-      "
-      embedded
-      color-space="sRGB"
-      renderer="antialias: true; precision: highp; physicallyCorrectLights: true; logarithmicDepthBuffer: true"
-      vr-mode-ui="enabled: false"
-      device-orientation-permission-ui="enabled: true"
-      id="scene">
-      <a-assets>
-        <!-- iOS-friendly: playsinline + muted; we unmute later if you want audio -->
-        <video id="overlayVid"
-               src="./overlay.mp4"
-               preload="auto"
-               muted
-               playsinline
-               webkit-playsinline
-               crossorigin="anonymous"
-               loop></video>
-      </a-assets>
+  <a-scene
+    mindar-image="
+      imageTargetSrc: ./targets.mind;
+      autoStart: false;
+      uiScanning: auto; uiLoading: auto;
+      filterMinCF: 0.001; filterBeta: 10; warmupTolerance: 5; missTolerance: 5
+    "
+    embedded
+    color-space="sRGB"
+    renderer="antialias: true; precision: highp; physicallyCorrectLights: true; logarithmicDepthBuffer: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: true"
+    id="scene">
 
-      <a-camera position="0 0 0" look-controls="enabled:false"></a-camera>
+    <a-assets>
+      <!-- IMPORTANT:
+           1) If the file is SAME-ORIGIN, REMOVE crossorigin completely.
+           2) If it's CROSS-ORIGIN, KEEP crossorigin="anonymous" AND serve CORS headers from your server.
+      -->
+      <video id="overlayVid"
+             src="./overlay.mp4"
+             preload="auto"
+             muted
+             playsinline webkit-playsinline
+             loop></video>
+    </a-assets>
 
-      <!-- Anchor receives targetFound/targetLost -->
-      <a-entity mindar-image-target="targetIndex: 0" id="anchor">
-        <!-- Content we show; give it a tiny +Z to avoid any z artifacts and draw both sides -->
-        <a-video id="plane"
-                 src="#overlayVid"
-                 position="0 0 0.001"
-                 width="1"
-                 height="0.56"
-                 material="shader:flat; transparent:true; opacity:1; side:double">
-        </a-video>
-      </a-entity>
-    </a-scene>
+    <a-camera position="0 0 0" look-controls="enabled:false"></a-camera>
 
-    <script>
-      const $ = s => document.querySelector(s);
-      const log = (...a) => { const p = $('#log'); p.textContent += a.map(x => typeof x==='string'?x:JSON.stringify(x)).join(' ') + '\n'; p.scrollTop = p.scrollHeight; };
-      const setStatus = t => $('#status').textContent = t;
+    <!-- Anchor receives MindAR events -->
+    <a-entity mindar-image-target="targetIndex: 0" id="anchor">
+      <!-- Fallback: green plane so you know the mesh is drawing -->
+      <a-plane id="fallback" color="#07c85e" width="1.02" height="1.53" position="0 0 0.0005" visible="false"></a-plane>
 
-      const scene = $('#scene');
-      const anchor = $('#anchor');
-      const plane  = $('#plane');
-      const vid    = $('#overlayVid');
+      <!-- Video surface (portrait like your original: 1.02 x 1.53) -->
+      <a-plane id="surface"
+               width="1.02" height="1.53" position="0 0 0.001"
+               material="shader:flat; transparent:true; opacity:1; side:double;">
+      </a-plane>
+    </a-entity>
+  </a-scene>
 
-      // --- Hard rules ---
-      // 1) Start video playback on user gesture (iOS requirement). 2) Rebind the material when target is found.
-      // 3) Verify mesh/material presence; re-grab if A-Frame replaces it.
+  <script>
+    const $ = s => document.querySelector(s);
+    const scene = $('#scene');
+    const anchor = $('#anchor');
+    const surface = $('#surface');  // plane we paint the video on
+    const fallback = $('#fallback');
+    const vid = $('#overlayVid');
+    const log = (...a) => { const p=$('#log'); p.textContent += a.join(' ')+'\n'; p.scrollTop = p.scrollHeight; };
+    const setStatus = t => $('#status').textContent = t;
 
-      async function unlockMediaOnce() {
-        try {
-          vid.muted = true;                   // required for reliable iOS playback
-          await vid.play();                   // play on user gesture
-          vid.pause();                        // pause immediately; we resume on targetFound
-          log('unlockMediaOnce: ok. readyState=', vid.readyState, 'paused=', vid.paused);
-        } catch (e) {
-          log('unlockMediaOnce: FAILED', e && e.message);
-        }
+    let videoTexture = null;
+
+    async function userUnlock() {
+      try {
+        vid.muted = true;                   // iOS autoplay policy: must be muted at gesture time
+        await vid.play();
+        vid.pause();
+        log('userUnlock ok. readyState=', vid.readyState, 'paused=', vid.paused);
+      } catch (e) {
+        log('userUnlock FAILED:', e && e.message);
       }
+    }
 
-      function bindVideoMaterial() {
-        // Ensure the a-video mesh exists and has a transparent, double-sided material
-        const mesh = plane.getObject3D('mesh');
-        if (!mesh) { log('bindVideoMaterial: mesh not ready yet'); return false; }
+    function forceBindVideoTexture() {
+      const mesh = surface.getObject3D('mesh');
+      if (!mesh) { log('forceBind: mesh not ready'); return false; }
 
-        plane.setAttribute('material', 'shader:flat; transparent:true; opacity:1; side:double;');
-        plane.setAttribute('src', '#overlayVid');    // reassert binding
+      // Create or refresh the Three.js VideoTexture explicitly
+      videoTexture = new THREE.VideoTexture(vid);
+      videoTexture.minFilter = THREE.LinearFilter;
+      videoTexture.magFilter = THREE.LinearFilter;
+      videoTexture.needsUpdate = true;
 
-        // In case we need to poke the underlying material/texture:
-        const mat = mesh.material;
-        if (mat && mat.map) { mat.needsUpdate = true; }
-        log('bindVideoMaterial: ok. mat?', !!mat, 'map?', !!(mat && mat.map));
-        return true;
+      mesh.material.map = videoTexture;
+      mesh.material.needsUpdate = true;
+
+      // Make sure it draws regardless of facing and alpha
+      surface.setAttribute('material', 'shader:flat; transparent:true; opacity:1; side:double;');
+
+      log('forceBind: OK (map set, needsUpdate=true)');
+      return true;
+    }
+
+    function showFallback(show) {
+      fallback.setAttribute('visible', !!show);
+    }
+
+    async function startAR() {
+      const sys = scene.systems['mindar-image-system'];
+      await sys.start();
+    }
+
+    $('#start').addEventListener('click', async () => {
+      if (!window.isSecureContext) { alert('Use HTTPS or camera is blocked.'); return; }
+      await userUnlock();
+      $('#gate').style.display = 'none';
+      setStatus('Starting AR…');
+      try { await startAR(); } catch (e) { log('MindAR start failed:', e.message); alert('AR failed: '+e.message); }
+    });
+
+    scene.addEventListener('arReady', () => { setStatus('Point at target'); log('arReady'); });
+
+    // Bind if A-Frame swaps the mesh
+    surface.addEventListener('object3dset', (e) => {
+      if (e.detail && e.detail.type === 'mesh') {
+        log('surface mesh set; binding texture');
+        forceBindVideoTexture();
       }
+    });
 
-      function forceVideoDimsToTarget() {
-        // Optional: adjust plane to your target’s aspect. Change numbers if your poster isn’t 16:9.
-        const aspect = vid.videoWidth && vid.videoHeight ? vid.videoWidth / vid.videoHeight : (16/9);
-        plane.setAttribute('width', 1.02);          // your previous width
-        plane.setAttribute('height', 1.02 / aspect);
-        log('forceVideoDimsToTarget: aspect=', aspect.toFixed(3));
+    anchor.addEventListener('targetFound', async () => {
+      setStatus('Target Locked ✓');
+      log('targetFound: readyState=', vid.readyState, 'paused=', vid.paused);
+
+      // Always bind (or re-bind) the texture on lock
+      forceBindVideoTexture();
+      showFallback(true);   // show the green underlay so you know the plane is drawing
+
+      try {
+        await vid.play();   // try with current mute state
+        log('video.play(): OK after lock');
+      } catch (e) {
+        log('video.play() failed on lock:', e && e.message);
       }
+    });
 
-      async function startAR() {
-        const sys = scene.systems['mindar-image-system'];
-        await sys.start();
-      }
+    anchor.addEventListener('targetLost', () => {
+      setStatus('Searching…');
+      try { vid.pause(); } catch(_) {}
+      log('targetLost: paused video');
+      showFallback(false);
+    });
 
-      $('#go').addEventListener('click', async ()=>{
-        if (!window.isSecureContext) { alert('Use HTTPS or camera is blocked.'); return; }
-        await unlockMediaOnce();
-        $('#start').style.display='none';
-        setStatus('Starting AR…');
-        try { await startAR(); } catch (e){ log('MindAR start failed', e.message); alert('AR failed: ' + e.message); return; }
-      });
-
-      // Scene ready
-      scene.addEventListener('arReady', ()=>{
-        setStatus('Point at target');
-        log('arReady');
-      });
-
-      // Robust mesh availability hook
-      plane.addEventListener('object3dset', (e)=>{
-        if (e.detail && e.detail.type === 'mesh') {
-          log('plane mesh set; binding material now');
-          bindVideoMaterial();
-        }
-      });
-
-      // Anchor events — these fire on the entity with mindar-image-target (documented)
-      anchor.addEventListener('targetFound', async ()=>{
-        setStatus('Target Locked ✓');
-        log('targetFound: trying to play video. readyState=', vid.readyState, 'paused=', vid.paused);
-
-        // On first lock, ensure plane material is bound and dimensions match
-        bindVideoMaterial();
-        forceVideoDimsToTarget();
-
-        try {
-          // iOS: if this rejects due to policies, we already had a user gesture; keep muted.
-          await vid.play();
-          log('video.play(): OK');
-        } catch (e) {
-          log('video.play(): failed -> retry muted', e && e.message);
-          try {
-            vid.muted = true;
-            await vid.play();
-            log('video.play() after mute: OK');
-          } catch (e2) {
-            log('video.play() still failed:', e2 && e2.message);
-          }
-        }
-      });
-
-      anchor.addEventListener('targetLost', ()=>{
-        setStatus('Searching…');
-        try { vid.pause(); } catch(_) {}
-        log('targetLost: paused video');
-      });
-
-      // Safety net: if mesh wasn’t ready at init, poll briefly until it is
-      let tries = 0;
-      const poll = setInterval(()=>{
-        if (bindVideoMaterial()) { clearInterval(poll); }
-        if (++tries > 120) clearInterval(poll); // ~2s
-      }, 16);
-
-      // Debug: tap anywhere to log current state
-      window.addEventListener('click', ()=>{
-        const mesh = plane.getObject3D('mesh');
-        log('tap: mesh?', !!mesh, 'opacity attr=', plane.getAttribute('material')?.opacity, 'video paused=', vid.paused, 'time=', vid.currentTime.toFixed(2));
-      });
-    </script>
-  </body>
+    // Tap anywhere to log current state
+    window.addEventListener('click', () => {
+      const mesh = surface.getObject3D('mesh');
+      const mat = mesh && mesh.material;
+      log('tap: mesh?', !!mesh, 'map?', !!(mat && mat.map), 'opacity=', surface.getAttribute('material')?.opacity, 'vid paused=', vid.paused, 't=', vid.currentTime.toFixed(2));
+    });
+  </script>
+</body>
 </html>
